@@ -67,7 +67,7 @@ describe('settings namespace', () => {
     expect(settings.options[0]?.applies).toBe('live')
     expect(settings.options[0]?.base).toMatchObject({
       webPath: '/plan-store',
-      exportDir: '.kilo/plans',
+      exportDir: '.dsh/plans',
       autoExport: true,
       promptActivePlans: true,
       promptActiveLimit: 5,

@@ -1504,7 +1504,7 @@ window.__ModuleLoader__.load({
           try {
             await scope.set("storageRoot", String(form.storageRoot || ""));
             await scope.set("webPath", String(form.webPath || DEFAULT_WEB_PATH));
-            await scope.set("exportDir", String(form.exportDir || ".kilo/plans"));
+            await scope.set("exportDir", String(form.exportDir || ".dsh/plans"));
             await scope.set("autoExport", !!form.autoExport);
             await scope.set("promptActivePlans", !!form.promptActivePlans);
             await scope.set("promptActiveLimit", Number(form.promptActiveLimit) || 0);
@@ -1568,7 +1568,7 @@ window.__ModuleLoader__.load({
       return {
         storageRoot: typeof source.storageRoot === "string" ? source.storageRoot : "",
         webPath: typeof source.webPath === "string" ? source.webPath : DEFAULT_WEB_PATH,
-        exportDir: typeof source.exportDir === "string" ? source.exportDir : ".kilo/plans",
+        exportDir: typeof source.exportDir === "string" ? source.exportDir : ".dsh/plans",
         autoExport: source.autoExport !== false,
         promptActivePlans: source.promptActivePlans !== false,
         promptActiveLimit: typeof source.promptActiveLimit === "number" ? source.promptActiveLimit : 5,

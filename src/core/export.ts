@@ -2,7 +2,7 @@
  * Markdown export of a plan into its workspace.
  *
  * The database stays the source of truth, but the user's global rules require a
- * plan file under `.kilo/plans/`, so every plan can be rendered as markdown with
+ * plan file under `.dsh/plans/`, so every plan can be rendered as markdown with
  * checkboxes and written next to the project. The file carries a marker with the
  * plan id, which is how the writer tells its own files from hand-written ones:
  * a foreign file is never overwritten — the export then falls back to
@@ -28,7 +28,7 @@ export function generatedMarker(planId: string): string {
 export interface ExportOptions {
   /** Absolute workspace root that receives the file. */
   workspaceRoot: string
-  /** Directory relative to the workspace root (default `.kilo/plans`). */
+  /** Directory relative to the workspace root (default `.dsh/plans`). */
   exportDir: string
   /** Timestamp rendered into the file; defaults to now. */
   exportedAt?: string
@@ -152,7 +152,7 @@ export function resolveExportPath(tree: PlanTree, directory: string): string {
 export function exportPlanToWorkspace(tree: PlanTree, options: ExportOptions): ExportWriteResult {
   const workspaceRoot = options.workspaceRoot.trim()
   if (workspaceRoot.length === 0) throw new Error('The workspace root must not be empty.')
-  const exportDir = options.exportDir.trim().length > 0 ? options.exportDir.trim() : '.kilo/plans'
+  const exportDir = options.exportDir.trim().length > 0 ? options.exportDir.trim() : '.dsh/plans'
   const directory = join(workspaceRoot, exportDir)
   mkdirSync(directory, { recursive: true })
   const target = resolveExportPath(tree, directory)

@@ -224,7 +224,7 @@ describe('archive, purge and export', () => {
 
     const exported = await call(tools, 'plan_export', { id: planId })
     const path = String(exported['path'])
-    expect(path).toBe(join(harness.workspace, '.kilo/plans/export-me.md'))
+    expect(path).toBe(join(harness.workspace, '.dsh/plans/export-me.md'))
     expect(existsSync(path)).toBe(true)
     expect(readFileSync(path, 'utf8')).toContain('- [ ] a')
 

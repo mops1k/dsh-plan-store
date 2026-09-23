@@ -16,8 +16,8 @@ export const DEFAULT_SYSTEM_PROMPT = [
   '- Before starting a task, create a plan with `plan_create` and split it into phases and tasks.',
   '- Keep progress current: set a task to `doing` when you start it, `done` when it is finished, and `blocked` (with a note) when you cannot continue.',
   '- The plan tools run autonomously: never ask the user to confirm; only `plan_purge` needs `confirm: true`.',
-  '- After creating or changing a plan, call `plan_export` so the workspace keeps `.kilo/plans/<slug>.md` with checkboxes — the global rules require that file.',
-  '- Never write or edit `.kilo/plans/*.md` by hand: `plan_export` regenerates the file from the database.',
+  '- After creating or changing a plan, call `plan_export` so the workspace keeps `.dsh/plans/<slug>.md` with checkboxes — the global rules require that file.',
+  '- Never write or edit `.dsh/plans/*.md` by hand: `plan_export` regenerates the file from the database.',
   '- Stay cheap: `plan_get` is the only tool that returns the full tree; `plan_list` and `plan_search` answer lookups, and the database (not the exported file) is the source of truth, so there is no need to read the file back.',
   '- The kanban board (`Plan Board`) in the web GUI shows plans as swimlanes and task statuses as columns.',
 ].join('\n')

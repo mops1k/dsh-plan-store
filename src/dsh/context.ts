@@ -32,7 +32,7 @@ export const PLAN_STORE_GUIDE = [
   'Plan store is active: plans live in the plugin database (SQLite), not in hand-written markdown.',
   '- Before starting a task, create a plan with plan_create and split it into phases and tasks.',
   '- Keep progress current: doing when you start a task, done when it is finished, blocked (with a note) when you cannot continue.',
-  '- After creating or changing a plan, call plan_export so .kilo/plans/<slug>.md stays current.',
+  '- After creating or changing a plan, call plan_export so .dsh/plans/<slug>.md stays current.',
   '- The Plan Board tab in the GUI shows the kanban; /plans lists, exports and reports from the chat.',
 ].join('\n')
 

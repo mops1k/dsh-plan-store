@@ -177,7 +177,7 @@ describe('read endpoints', () => {
     expect(status.json['fts']).toBe(true)
 
     const config = await request('GET', '/plan-store/api/config')
-    expect(config.json).toMatchObject({ webPath: '/plan-store', exportDir: '.kilo/plans', autoExport: true })
+    expect(config.json).toMatchObject({ webPath: '/plan-store', exportDir: '.dsh/plans', autoExport: true })
 
     const workspaces = await request('GET', '/plan-store/api/workspaces')
     expect(workspaces.json['workspaces']).toHaveLength(1)
@@ -275,7 +275,7 @@ describe('write endpoints', () => {
     const { status, json } = await request('POST', '/plan-store/api/export', { id: created.id })
     expect(status).toBe(200)
     const path = String(json['path'])
-    expect(path).toBe(join(harness.workspace, '.kilo/plans/export-from-board.md'))
+    expect(path).toBe(join(harness.workspace, '.dsh/plans/export-from-board.md'))
     expect(existsSync(path)).toBe(true)
   })
 

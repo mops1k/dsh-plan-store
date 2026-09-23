@@ -79,17 +79,17 @@ describe('exportPlanToWorkspace', () => {
     const tree = harness.engine.requireTree(id)
     const first = exportPlanToWorkspace(tree, {
       workspaceRoot: harness.workspace,
-      exportDir: '.kilo/plans',
+      exportDir: '.dsh/plans',
       exportedAt: '2026-09-23T12:00:00.000Z',
     })
     expect(first.created).toBe(true)
-    expect(first.path).toBe(join(harness.workspace, '.kilo/plans/export-me.md'))
+    expect(first.path).toBe(join(harness.workspace, '.dsh/plans/export-me.md'))
     expect(existsSync(first.path)).toBe(true)
     expect(isOwnedBy(first.path, id)).toBe(true)
 
     const second = exportPlanToWorkspace({ ...tree, description: 'Second revision' }, {
       workspaceRoot: harness.workspace,
-      exportDir: '.kilo/plans',
+      exportDir: '.dsh/plans',
     })
     expect(second.path).toBe(first.path)
     expect(second.created).toBe(false)
@@ -97,7 +97,7 @@ describe('exportPlanToWorkspace', () => {
   })
 
   it('never clobbers a hand-written file and falls back to a suffixed name', () => {
-    const directory = join(harness.workspace, '.kilo/plans')
+    const directory = join(harness.workspace, '.dsh/plans')
     mkdirSync(directory, { recursive: true })
     writeFileSync(join(directory, 'export-me.md'), '# hand written\n', 'utf8')
 
@@ -105,7 +105,7 @@ describe('exportPlanToWorkspace', () => {
     const tree = harness.engine.requireTree(id)
     expect(resolveExportPath(tree, directory)).toBe(join(directory, `export-me-${id.replace(/[^a-zA-Z0-9]+/gu, '')}.md`))
 
-    const result = exportPlanToWorkspace(tree, { workspaceRoot: harness.workspace, exportDir: '.kilo/plans' })
+    const result = exportPlanToWorkspace(tree, { workspaceRoot: harness.workspace, exportDir: '.dsh/plans' })
     expect(result.path).not.toBe(join(directory, 'export-me.md'))
     expect(readFileSync(join(directory, 'export-me.md'), 'utf8')).toBe('# hand written\n')
   })
@@ -123,6 +123,6 @@ describe('exportPlanToWorkspace', () => {
 
   it('rejects an empty workspace root', () => {
     const id = seedPlan()
-    expect(() => exportPlanToWorkspace(harness.engine.requireTree(id), { workspaceRoot: '  ', exportDir: '.kilo/plans' })).toThrow(/workspace root/u)
+    expect(() => exportPlanToWorkspace(harness.engine.requireTree(id), { workspaceRoot: '  ', exportDir: '.dsh/plans' })).toThrow(/workspace root/u)
   })
 })

@@ -9,7 +9,7 @@
  *
  * The workspace of a call is derived from the calling session's working
  * directory (see `./session.ts`), so `plan_create` binds a plan to its project
- * and `plan_export` can write `.kilo/plans/<slug>.md` without extra arguments.
+ * and `plan_export` can write `.dsh/plans/<slug>.md` without extra arguments.
  *
  * @module dsh-plan-store/dsh/tools
  */
@@ -856,7 +856,7 @@ export function registerPlanTools(ctx: Context, engine: PlanEngine, config: Plan
   register(
     defineTool({
       name: 'plan_export',
-      description: 'Export one plan as markdown with checkboxes into .kilo/plans/<slug>.md.',
+      description: 'Export one plan as markdown with checkboxes into .dsh/plans/<slug>.md.',
       parameters: {
         id: { type: 'string', required: true, description: 'Plan id (p_…).' },
         workspaceRoot: { type: 'string', description: 'Absolute workspace root; defaults to the session cwd.' },

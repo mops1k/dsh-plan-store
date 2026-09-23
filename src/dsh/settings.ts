@@ -36,7 +36,7 @@ export const PlanStoreSettingsSchema = z.object({
   exportDir: z
     .string()
     .default(DEFAULT_CONFIG.exportDir)
-    .description('Export directory relative to the workspace root (default .kilo/plans).'),
+    .description('Export directory relative to the workspace root (default .dsh/plans).'),
   autoExport: z
     .boolean()
     .default(DEFAULT_CONFIG.autoExport)

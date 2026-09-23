@@ -94,7 +94,7 @@ try {
     const purged = await post('/api/plan/purge', { id: planId, confirm: true }).catch(() => null)
     console.log(`INFO probe plan ${planId} purged: ${purged?.body?.purged === true}`)
   }
-  rmSync(join(workspace, '.kilo'), { recursive: true, force: true })
+  rmSync(join(workspace, '.dsh'), { recursive: true, force: true })
 }
 
 const failed = results.filter((entry) => !entry.ok)

@@ -337,7 +337,7 @@ describe('listing, search and reporting', () => {
 })
 
 describe('export', () => {
-  it('writes the plan into .kilo/plans and journals the path', () => {
+  it('writes the plan into .dsh/plans and journals the path', () => {
     const created = harness.engine.createPlan({
       title: 'Export me',
       workspaceRoot: harness.workspace,
@@ -346,7 +346,7 @@ describe('export', () => {
     harness.engine.updateTask(created.phases[0]!.tasks[1]!.id, { status: 'done' })
 
     const result = harness.engine.exportPlan(created.id)
-    expect(result.path).toBe(join(harness.workspace, '.kilo/plans/export-me.md'))
+    expect(result.path).toBe(join(harness.workspace, '.dsh/plans/export-me.md'))
     expect(existsSync(result.path)).toBe(true)
     const markdown = readFileSync(result.path, 'utf8')
     expect(markdown).toContain('- [ ] first')

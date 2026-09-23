@@ -145,8 +145,8 @@ describe('/plans command', () => {
 
     const exported = await runPlanCommand(invocation(`export ${created.id}`), ctx, harness.engine)
     expect(exported.kind).toBe('success')
-    expect(exported.text).toContain('.kilo/plans/command-plan.md')
-    expect(existsSync(join(harness.workspace, '.kilo/plans/command-plan.md'))).toBe(true)
+    expect(exported.text).toContain('.dsh/plans/command-plan.md')
+    expect(existsSync(join(harness.workspace, '.dsh/plans/command-plan.md'))).toBe(true)
 
     const all = await runPlanCommand(invocation('export'), ctx, harness.engine)
     expect(all.kind).toBe('success')

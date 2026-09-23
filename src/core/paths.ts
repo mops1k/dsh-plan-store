@@ -5,7 +5,7 @@
  *   <root>/plans.db     SQLite database with the plans, phases, tasks and journal
  *
  * Exported plan files are written into the workspace itself, by default at
- * `<workspaceRoot>/.kilo/plans/<slug>.md`.
+ * `<workspaceRoot>/.dsh/plans/<slug>.md`.
  *
  * @module dsh-plan-store/core/paths
  */
@@ -23,7 +23,7 @@ export const STORE_DIR = 'plan-store'
 export const DB_FILE = 'plans.db'
 
 /** Default export directory, relative to the workspace root. */
-export const DEFAULT_EXPORT_DIR = '.kilo/plans'
+export const DEFAULT_EXPORT_DIR = '.dsh/plans'
 
 /** Maximum length of a generated slug. */
 export const MAX_SLUG_LENGTH = 48
