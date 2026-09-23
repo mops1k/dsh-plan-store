@@ -89,6 +89,20 @@ describe('planTodoItems', () => {
     harness.engine.archivePlan(tree.id)
     expect(planTodoItems(harness.engine.requireTree(tree.id, 0), config())).toEqual([])
   })
+
+  it('drops the items of a finished plan and restores them when a task reopens', () => {
+    const tree = seedPlan()
+    for (const phase of tree.phases) {
+      for (const task of phase.tasks) harness.engine.updateTask(task.id, { status: 'done' })
+    }
+    const finished = harness.engine.requireTree(tree.id, 0)
+    expect(finished.status).toBe('done')
+    expect(planTodoItems(finished, config())).toEqual([])
+
+    const reopened = harness.engine.updateTask(finished.phases[0]!.tasks[0]!.id, { status: 'todo' })
+    expect(reopened.status).toBe('active')
+    expect(planTodoItems(reopened, config()).length).toBeGreaterThan(0)
+  })
 })
 
 describe('readSessionTodos', () => {

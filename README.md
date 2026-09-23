@@ -68,8 +68,10 @@ All tools run autonomously; only `plan_purge` requires an explicit confirmation 
 Every plan mutation also mirrors the touched plan into the session **todo panel**: the plugin appends
 `todo/write` with that plan's tasks (each marked `[plan:<id>] …`) merged over the current list, so items
 the model wrote by hand survive. `blocked` tasks show as pending, at most one item is `in_progress`
-unless `todoParallelInProgress` is on, and the mirror is capped by `todoMaxItems`. The host resets its
-todo list on `turn/start`, so the panel is refilled by the next `plan_*` call.
+unless `todoParallelInProgress` is on, and the mirror is capped by `todoMaxItems`. A finished plan
+(`done` or `archived`) mirrors nothing, so its items leave the panel once every task is done and come
+back if a task is reopened. The host resets its todo list on `turn/start`, so the panel is refilled by
+the next `plan_*` call.
 
 ## Human command
 

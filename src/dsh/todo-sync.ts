@@ -60,12 +60,16 @@ function todoStatusOf(status: TaskStatus): SessionTodo['status'] {
 /**
  * Build the todo list of one plan.
  *
- * Archived plans produce nothing. At most one item is `in_progress` unless the
- * deployment allows parallel work, and the list is capped by `todoMaxItems` so
- * a long plan cannot flood the panel.
+ * A finished plan mirrors nothing: once every task is `done` the engine marks
+ * the plan `done` (archived plans stay hidden too), so its items are removed
+ * from the panel — a completed plan needs no open work list. Reopening a task
+ * flips the plan back to `active`, and the next `plan_*` call restores the
+ * items. At most one item is `in_progress` unless the deployment allows
+ * parallel work, and the list is capped by `todoMaxItems` so a long plan cannot
+ * flood the panel.
  */
 export function planTodoItems(tree: PlanTree, config: PlanStoreConfig): SessionTodo[] {
-  if (tree.status === 'archived') return []
+  if (tree.status === 'archived' || tree.status === 'done') return []
   const marker = planMarker(tree.id)
   const items: SessionTodo[] = []
   let active = 0
