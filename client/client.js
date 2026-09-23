@@ -446,6 +446,11 @@ window.__ModuleLoader__.load({
         const [drawer, setDrawer] = React.useState(null);
         const [modal, setModal] = React.useState(null);
         const [dragging, setDragging] = React.useState(null);
+        // Manual lane toggles (plan id -> explicitly open). Lanes that the user
+        // never touched follow the status default: active/blocked open, the
+        // rest (backlog, done, archived) collapsed. Kept in memory on purpose:
+        // a page reload returns to the default view.
+        const [laneOpen, setLaneOpen] = React.useState({});
 
         const query = React.useMemo(() => {
           const parts = ["limit=200"];
@@ -682,14 +687,43 @@ window.__ModuleLoader__.load({
             ),
           );
 
-        const renderLane = (plan) =>
-          h(
+        /** Whether one plan lane renders collapsed right now. */
+        const laneCollapsed = (plan) =>
+          Object.prototype.hasOwnProperty.call(laneOpen, plan.id)
+            ? !laneOpen[plan.id]
+            : plan.status !== "active" && plan.status !== "blocked";
+
+        /** Flip one lane, remembering the user's explicit choice. */
+        const toggleLane = (plan) =>
+          setLaneOpen((previous) => Object.assign({}, previous, { [plan.id]: laneCollapsed(plan) }));
+
+        const renderLane = (plan) => {
+          const collapsed = laneCollapsed(plan);
+          return h(
             "div",
             { key: plan.id, style: S.lane },
             h(
               "div",
               { style: S.laneHead },
-              h("h3", { style: S.laneTitle }, plan.title),
+              h(
+                "button",
+                {
+                  type: "button",
+                  style: S.button,
+                  title: collapsed ? "Expand plan" : "Collapse plan",
+                  "aria-expanded": !collapsed,
+                  onClick: () => toggleLane(plan),
+                },
+                collapsed ? "\u25B8" : "\u25BE",
+              ),
+              h(
+                "h3",
+                {
+                  style: Object.assign({}, S.laneTitle, { cursor: "pointer" }),
+                  onClick: () => toggleLane(plan),
+                },
+                plan.title,
+              ),
               h("span", { style: S.badge }, plan.status),
               plan.priority !== "normal" ? h("span", { style: S.badge }, plan.priority) : null,
               plan.workspace ? h("span", { style: S.muted }, plan.workspace) : null,
@@ -735,12 +769,19 @@ window.__ModuleLoader__.load({
                     "Archive",
                   ),
             ),
-            plan.description ? h("div", { style: S.laneNote }, truncate(plan.description, 180)) : null,
-            (plan.phases || []).map((phase) => renderPhase(plan, phase)),
-            (plan.phases || []).length === 0
-              ? h("div", { style: S.phase }, h("span", { style: S.muted }, "No phases yet."))
-              : null,
+            collapsed
+              ? null
+              : h(React.Fragment, null, [
+                  plan.description
+                    ? h("div", { key: "note", style: S.laneNote }, truncate(plan.description, 180))
+                    : null,
+                  (plan.phases || []).map((phase) => renderPhase(plan, phase)),
+                  (plan.phases || []).length === 0
+                    ? h("div", { key: "empty", style: S.phase }, h("span", { style: S.muted }, "No phases yet."))
+                    : null,
+                ]),
           );
+        };
 
         return h(
           "div",

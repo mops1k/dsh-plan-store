@@ -92,7 +92,9 @@ untouched. Disable with `syncGoal`.
 
 - **Plan Board** — swimlanes (rows = plans, sub-rows = phases, columns = task statuses) with HTML5
   drag&drop, per-plan progress, filters (workspace, status, text, archived), task and plan drawers
-  with the journal, and create/edit/export/archive actions.
+  with the journal, and create/edit/export/archive actions. Inactive plans (`backlog`, `done`,
+  `archived`) start collapsed as a single header row with a `▸`/`▾` toggle; `active` and `blocked`
+  lanes start expanded, and manual toggles last until the page reloads.
 - **Goals & Todos** — the current session's goal (resume/pause/complete/block/edit) and todo list
   (status cycling, add, remove) with an **Import into plan** button.
 - **Settings → Plan Board** — the settings card for the namespace below.
