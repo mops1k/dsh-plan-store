@@ -73,6 +73,12 @@ unless `todoParallelInProgress` is on, and the mirror is capped by `todoMaxItems
 back if a task is reopened. The host resets its todo list on `turn/start`, so the panel is refilled by
 the next `plan_*` call.
 
+The same mutations keep the session **goal** aligned with the plan: a live plan sets the objective
+`Complete the plan: <title>`, created and immediately disarmed so the goal is visible in the chat
+without starting the automatic continuation rounds of the goal driver. A finished or archived plan
+clears that goal, and a goal owned by the user or another plugin (a different objective prefix) is left
+untouched. Disable with `syncGoal`.
+
 ## Human command
 
 ```
@@ -129,6 +135,7 @@ POST /api/session/goal|todos|import
 | `promptActiveLimit` | `5` | Maximum number of plans in that summary (0 disables it) |
 | `stalePlanDays` | `14` | Age after which a plan is reported as stale |
 | `syncTodos` | `true` | Mirror the touched plan into the session todo panel after every change |
+| `syncGoal` | `true` | Mirror the touched plan into the session goal (created disarmed) |
 | `todoParallelInProgress` | `false` | Allow several in-progress items in the mirrored list |
 | `todoMaxItems` | `25` | Maximum number of items mirrored from one plan |
 | `systemPrompt` | built-in English | Guidance injected into the system prompt |
@@ -160,7 +167,7 @@ pnpm build       # tsc + copy client/client.js -> lib/client.js
 
 ```
 src/core/       types, paths, config, store (SQLite + FTS5), engine, export, session import mapping
-src/dsh/        tools, context (prompt + /plans), settings, web (HTTP API), session bridge, todo sync
+src/dsh/        tools, context (prompt + /plans), settings, web (HTTP API), session bridge, todo sync, goal sync
 client/         classic browser module: Plan Board and Goals & Todos views, settings card
 tests/          store, engine, export, tools, context, settings, web, client, import, session state
 ```

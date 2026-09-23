@@ -27,6 +27,7 @@ import type {
   SearchHit,
   Task,
 } from '../core/types.js'
+import { syncPlanGoal } from './goal-sync.js'
 import { resolveWorkspace } from './session.js'
 import { readSessionState } from './session-state.js'
 import { syncPlanTodos } from './todo-sync.js'
@@ -445,6 +446,7 @@ export function registerPlanTools(ctx: Context, engine: PlanEngine, config: Plan
           { sessionId: exec.agent?.id === undefined ? null : String(exec.agent.id) },
         )
         syncPlanTodos(ctx, exec, tree, tree.id, config)
+        syncPlanGoal(ctx, exec, tree, config)
         return {
           text: `Created plan.\n\n${treeText(tree)}`,
           plan: treeJson(tree),
@@ -583,6 +585,7 @@ export function registerPlanTools(ctx: Context, engine: PlanEngine, config: Plan
         }
         const tree = engine.updatePlan(args.id, patch, { sessionId: sessionIdOf(exec) })
         syncPlanTodos(ctx, exec, tree, tree.id, config)
+        syncPlanGoal(ctx, exec, tree, config)
         return { text: `Updated plan.\n${headline(tree)}`, plan: treeJson(tree), progress: progressJson(tree.progress) }
       },
     }),
@@ -606,6 +609,7 @@ export function registerPlanTools(ctx: Context, engine: PlanEngine, config: Plan
       execute: async (args, exec) => {
         const tree = engine.archivePlan(args.id, { sessionId: sessionIdOf(exec) })
         syncPlanTodos(ctx, exec, tree, tree.id, config)
+        syncPlanGoal(ctx, exec, tree, config)
         return { text: `Archived plan ${tree.id}.`, plan: treeJson(tree), progress: progressJson(tree.progress) }
       },
     }),
@@ -634,6 +638,7 @@ export function registerPlanTools(ctx: Context, engine: PlanEngine, config: Plan
       execute: async (args, exec) => {
         const purged = engine.purgePlan(args.id, args.confirm)
         if (purged) syncPlanTodos(ctx, exec, null, args.id, config)
+        if (purged) syncPlanGoal(ctx, exec, null, config)
         return {
           text: purged ? `Purged plan ${args.id} with all of its phases and tasks.` : `Plan ${args.id} was not found.`,
           id: args.id,
@@ -678,6 +683,7 @@ export function registerPlanTools(ctx: Context, engine: PlanEngine, config: Plan
         )
         const addedPhase = tree.phases.find((phase) => !before.has(phase.id)) ?? null
         syncPlanTodos(ctx, exec, tree, tree.id, config)
+        syncPlanGoal(ctx, exec, tree, config)
         return {
           text: `Added phase.\n${headline(tree)}\n${addedPhase === null ? '' : phaseLine(addedPhase)}`.trimEnd(),
           plan: treeJson(tree),
@@ -716,6 +722,7 @@ export function registerPlanTools(ctx: Context, engine: PlanEngine, config: Plan
         const tree = engine.updatePhase(args.id, patch, { sessionId: sessionIdOf(exec) })
         const changedPhase = findPhase(tree, args.id)
         syncPlanTodos(ctx, exec, tree, tree.id, config)
+        syncPlanGoal(ctx, exec, tree, config)
         return {
           text: `Updated phase.\n${headline(tree)}\n${changedPhase === null ? '' : phaseLine(changedPhase)}`.trimEnd(),
           plan: treeJson(tree),
@@ -743,6 +750,7 @@ export function registerPlanTools(ctx: Context, engine: PlanEngine, config: Plan
       execute: async (args, exec) => {
         const tree = engine.deletePhase(args.id, { sessionId: sessionIdOf(exec) })
         syncPlanTodos(ctx, exec, tree, tree.id, config)
+        syncPlanGoal(ctx, exec, tree, config)
         return { text: `Deleted phase.\n${headline(tree)}`, plan: treeJson(tree), progress: progressJson(tree.progress) }
       },
     }),
@@ -790,6 +798,7 @@ export function registerPlanTools(ctx: Context, engine: PlanEngine, config: Plan
             .flatMap((phase) => phase.tasks.map((task) => ({ phase, task })))
             .find((entry) => !before.has(entry.task.id)) ?? null
         syncPlanTodos(ctx, exec, tree, tree.id, config)
+        syncPlanGoal(ctx, exec, tree, config)
         return {
           text: `Added task.\n${headline(tree)}\n${addedTask === null ? '' : taskLine(addedTask.task)}`.trimEnd(),
           plan: treeJson(tree),
@@ -832,6 +841,7 @@ export function registerPlanTools(ctx: Context, engine: PlanEngine, config: Plan
         const tree = engine.updateTask(args.id, patch, { sessionId: sessionIdOf(exec) })
         const changedTask = findTask(tree, args.id)
         syncPlanTodos(ctx, exec, tree, tree.id, config)
+        syncPlanGoal(ctx, exec, tree, config)
         return {
           text: `Updated task.\n${headline(tree)}\n${changedTask === null ? '' : taskLine(changedTask.task)}`.trimEnd(),
           plan: treeJson(tree),
@@ -859,6 +869,7 @@ export function registerPlanTools(ctx: Context, engine: PlanEngine, config: Plan
       execute: async (args, exec) => {
         const tree = engine.deleteTask(args.id, { sessionId: sessionIdOf(exec) })
         syncPlanTodos(ctx, exec, tree, tree.id, config)
+        syncPlanGoal(ctx, exec, tree, config)
         return { text: `Deleted task.\n${headline(tree)}`, plan: treeJson(tree), progress: progressJson(tree.progress) }
       },
     }),
@@ -994,6 +1005,7 @@ export function registerPlanTools(ctx: Context, engine: PlanEngine, config: Plan
             ? ''
             : `\n${snapshot.todos.length} todo item(s): +${result.actions.add.length} / ~${result.actions.update.length} / -${result.actions.remove.length}`
         syncPlanTodos(ctx, exec, tree, tree.id, config)
+        syncPlanGoal(ctx, exec, tree, config)
         return {
           text: `${result.created ? 'Imported session' : 'Refreshed plan from session'} ${sessionId}.\n${headline(tree)}\n${
             phase === undefined ? '' : phaseLine(phase)

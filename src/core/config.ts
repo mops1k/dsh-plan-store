@@ -40,6 +40,8 @@ export interface PlanStoreConfig {
   stalePlanDays: number
   /** Mirror the touched plan into the calling session's todo panel. */
   syncTodos: boolean
+  /** Mirror the touched plan into the calling session's goal (created disarmed). */
+  syncGoal: boolean
   /** Allow several `in_progress` items in the mirrored todo list. */
   todoParallelInProgress: boolean
   /** Maximum number of todo items mirrored from one plan. */
@@ -58,6 +60,7 @@ export const DEFAULT_CONFIG: PlanStoreConfig = {
   promptActiveLimit: 5,
   stalePlanDays: 14,
   syncTodos: true,
+  syncGoal: true,
   todoParallelInProgress: false,
   todoMaxItems: 25,
   systemPrompt: DEFAULT_SYSTEM_PROMPT,
@@ -96,6 +99,7 @@ export function mergeConfig(input?: Partial<PlanStoreConfig> | null): PlanStoreC
     promptActiveLimit: clampInt(source.promptActiveLimit, DEFAULT_CONFIG.promptActiveLimit, 0, 20),
     stalePlanDays: clampInt(source.stalePlanDays, DEFAULT_CONFIG.stalePlanDays, 1, 3650),
     syncTodos: source.syncTodos !== false,
+    syncGoal: source.syncGoal !== false,
     todoParallelInProgress: source.todoParallelInProgress === true,
     todoMaxItems: clampInt(source.todoMaxItems, DEFAULT_CONFIG.todoMaxItems, 1, 200),
     systemPrompt:

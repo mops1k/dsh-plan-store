@@ -61,6 +61,10 @@ export const PlanStoreSettingsSchema = z.object({
     .boolean()
     .default(DEFAULT_CONFIG.syncTodos)
     .description('Mirror the touched plan into the session todo panel after every plan change.'),
+  syncGoal: z
+    .boolean()
+    .default(DEFAULT_CONFIG.syncGoal)
+    .description('Mirror the touched plan into the session goal (created disarmed) after every plan change.'),
   todoParallelInProgress: z
     .boolean()
     .default(DEFAULT_CONFIG.todoParallelInProgress)
@@ -91,6 +95,7 @@ function toSettings(config: PlanStoreConfig): PlanStoreSettings {
     promptActiveLimit: config.promptActiveLimit,
     stalePlanDays: config.stalePlanDays,
     syncTodos: config.syncTodos,
+    syncGoal: config.syncGoal,
     todoParallelInProgress: config.todoParallelInProgress,
     todoMaxItems: config.todoMaxItems,
     systemPrompt: config.systemPrompt,
@@ -108,6 +113,7 @@ function fromSettings(next: PlanStoreSettings): PlanStoreConfig {
     promptActiveLimit: next.promptActiveLimit,
     stalePlanDays: next.stalePlanDays,
     syncTodos: next.syncTodos,
+    syncGoal: next.syncGoal,
     todoParallelInProgress: next.todoParallelInProgress,
     todoMaxItems: next.todoMaxItems,
     systemPrompt: next.systemPrompt,
@@ -128,6 +134,7 @@ function applyConfig(target: PlanStoreConfig, next: PlanStoreConfig): void {
   target.promptActiveLimit = next.promptActiveLimit
   target.stalePlanDays = next.stalePlanDays
   target.syncTodos = next.syncTodos
+  target.syncGoal = next.syncGoal
   target.todoParallelInProgress = next.todoParallelInProgress
   target.todoMaxItems = next.todoMaxItems
   target.systemPrompt = next.systemPrompt
