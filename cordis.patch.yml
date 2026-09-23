@@ -1,0 +1,9 @@
+# Bundle patch for dsh-plan-store.
+#
+# When this package is installed into a dsh profile, the reconciler appends it
+# to `dsh.profile.bundles` and applies this patch layer. The profile's own
+# `cordis.patch.yml` (applied later) may replace the `config` object wholesale.
+- insert:
+    - id: dsh-plan-store
+      name: dsh-plan-store
+      config: {}
