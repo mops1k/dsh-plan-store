@@ -1,7 +1,21 @@
 {
   "name": "dsh-plan-store",
-  "version": "0.0.1",
+  "version": "0.1.0",
   "description": "Database-backed plan store for DeepSeek Harness: plan_* tools, SQLite/FTS5 storage, project export and a kanban board in the web GUI.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/mops1k/dsh-plan-store.git"
+  },
+  "keywords": [
+    "deepseek-harness",
+    "dsh",
+    "dsh-plugin",
+    "client-plugin",
+    "plan",
+    "plan-store",
+    "kanban"
+  ],
   "type": "module",
   "main": "lib/index.js",
   "types": "lib/index.d.ts",
@@ -18,6 +32,7 @@
     "lib",
     "client",
     "cordis.patch.yml",
+    "LICENSE",
     "README.md"
   ],
   "engines": {
