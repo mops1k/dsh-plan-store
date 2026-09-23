@@ -65,6 +65,12 @@ way. Manual `blocked`/`archived` states are never overwritten.
 
 All tools run autonomously; only `plan_purge` requires an explicit confirmation argument.
 
+Every plan mutation also mirrors the touched plan into the session **todo panel**: the plugin appends
+`todo/write` with that plan's tasks (each marked `[plan:<id>] …`) merged over the current list, so items
+the model wrote by hand survive. `blocked` tasks show as pending, at most one item is `in_progress`
+unless `todoParallelInProgress` is on, and the mirror is capped by `todoMaxItems`. The host resets its
+todo list on `turn/start`, so the panel is refilled by the next `plan_*` call.
+
 ## Human command
 
 ```
@@ -120,6 +126,9 @@ POST /api/session/goal|todos|import
 | `promptActivePlans` | `true` | Include the active-plan summary in the system prompt |
 | `promptActiveLimit` | `5` | Maximum number of plans in that summary (0 disables it) |
 | `stalePlanDays` | `14` | Age after which a plan is reported as stale |
+| `syncTodos` | `true` | Mirror the touched plan into the session todo panel after every change |
+| `todoParallelInProgress` | `false` | Allow several in-progress items in the mirrored list |
+| `todoMaxItems` | `25` | Maximum number of items mirrored from one plan |
 | `systemPrompt` | built-in English | Guidance injected into the system prompt |
 
 ## Token cost
@@ -149,7 +158,7 @@ pnpm build       # tsc + copy client/client.js -> lib/client.js
 
 ```
 src/core/       types, paths, config, store (SQLite + FTS5), engine, export, session import mapping
-src/dsh/        tools, context (prompt + /plans), settings, web (HTTP API), session bridge
+src/dsh/        tools, context (prompt + /plans), settings, web (HTTP API), session bridge, todo sync
 client/         classic browser module: Plan Board and Goals & Todos views, settings card
 tests/          store, engine, export, tools, context, settings, web, client, import, session state
 ```
@@ -159,4 +168,6 @@ tests/          store, engine, export, tools, context, settings, web, client, im
 - Goal and todo are session state, not a store: only live sessions can be shown or modified.
 - Existing `.dsh/plans/*.md` files are not imported (by decision); the plugin starts from scratch.
 - Todo items have no identity, so the import matches tasks by title.
+- The todo mirror needs an agent session (a call without an owning agent is skipped) and the host
+  resets the list on `turn/start`; the panel is refilled by the next `plan_*` call.
 - Without FTS5 in the Node build, search degrades to a `LIKE` substring match.

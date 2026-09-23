@@ -38,6 +38,12 @@ export interface PlanStoreConfig {
   promptActiveLimit: number
   /** Age in days after which an untouched plan counts as stale. */
   stalePlanDays: number
+  /** Mirror the touched plan into the calling session's todo panel. */
+  syncTodos: boolean
+  /** Allow several `in_progress` items in the mirrored todo list. */
+  todoParallelInProgress: boolean
+  /** Maximum number of todo items mirrored from one plan. */
+  todoMaxItems: number
   /** Editable system-prompt guidance. */
   systemPrompt: string
 }
@@ -51,6 +57,9 @@ export const DEFAULT_CONFIG: PlanStoreConfig = {
   promptActivePlans: true,
   promptActiveLimit: 5,
   stalePlanDays: 14,
+  syncTodos: true,
+  todoParallelInProgress: false,
+  todoMaxItems: 25,
   systemPrompt: DEFAULT_SYSTEM_PROMPT,
 }
 
@@ -86,6 +95,9 @@ export function mergeConfig(input?: Partial<PlanStoreConfig> | null): PlanStoreC
     promptActivePlans: source.promptActivePlans !== false,
     promptActiveLimit: clampInt(source.promptActiveLimit, DEFAULT_CONFIG.promptActiveLimit, 0, 20),
     stalePlanDays: clampInt(source.stalePlanDays, DEFAULT_CONFIG.stalePlanDays, 1, 3650),
+    syncTodos: source.syncTodos !== false,
+    todoParallelInProgress: source.todoParallelInProgress === true,
+    todoMaxItems: clampInt(source.todoMaxItems, DEFAULT_CONFIG.todoMaxItems, 1, 200),
     systemPrompt:
       typeof source.systemPrompt === 'string' && source.systemPrompt.trim().length > 0
         ? source.systemPrompt

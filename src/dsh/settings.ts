@@ -57,6 +57,20 @@ export const PlanStoreSettingsSchema = z.object({
     .step(1)
     .default(DEFAULT_CONFIG.stalePlanDays)
     .description('Age in days after which an untouched plan is reported as stale.'),
+  syncTodos: z
+    .boolean()
+    .default(DEFAULT_CONFIG.syncTodos)
+    .description('Mirror the touched plan into the session todo panel after every plan change.'),
+  todoParallelInProgress: z
+    .boolean()
+    .default(DEFAULT_CONFIG.todoParallelInProgress)
+    .description('Allow several in-progress items in the mirrored todo list (one at a time when off).'),
+  todoMaxItems: z
+    .number()
+    .min(1)
+    .step(1)
+    .default(DEFAULT_CONFIG.todoMaxItems)
+    .description('Maximum number of todo items mirrored from one plan.'),
   systemPrompt: z
     .string()
     .default(DEFAULT_SYSTEM_PROMPT)
@@ -76,6 +90,9 @@ function toSettings(config: PlanStoreConfig): PlanStoreSettings {
     promptActivePlans: config.promptActivePlans,
     promptActiveLimit: config.promptActiveLimit,
     stalePlanDays: config.stalePlanDays,
+    syncTodos: config.syncTodos,
+    todoParallelInProgress: config.todoParallelInProgress,
+    todoMaxItems: config.todoMaxItems,
     systemPrompt: config.systemPrompt,
   }
 }
@@ -90,6 +107,9 @@ function fromSettings(next: PlanStoreSettings): PlanStoreConfig {
     promptActivePlans: next.promptActivePlans,
     promptActiveLimit: next.promptActiveLimit,
     stalePlanDays: next.stalePlanDays,
+    syncTodos: next.syncTodos,
+    todoParallelInProgress: next.todoParallelInProgress,
+    todoMaxItems: next.todoMaxItems,
     systemPrompt: next.systemPrompt,
   })
 }
@@ -107,6 +127,9 @@ function applyConfig(target: PlanStoreConfig, next: PlanStoreConfig): void {
   target.promptActivePlans = next.promptActivePlans
   target.promptActiveLimit = next.promptActiveLimit
   target.stalePlanDays = next.stalePlanDays
+  target.syncTodos = next.syncTodos
+  target.todoParallelInProgress = next.todoParallelInProgress
+  target.todoMaxItems = next.todoMaxItems
   target.systemPrompt = next.systemPrompt
 }
 
