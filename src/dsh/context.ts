@@ -87,7 +87,8 @@ function registerSystemPrompt(ctx: Context, engine: PlanEngine, config: PlanStor
 }
 
 /** Inject the short plan guide when an agent session starts. */
-function registerSessionStartGuide(ctx: Context): void {
+function registerSessionStartGuide(ctx: Context, enabled: boolean): void {
+  if (!enabled) return
   ctx.on('agent/session-start', (payload: { agent: Agent }) => {
     try {
       payload.agent.inject(
@@ -213,7 +214,11 @@ export function registerPlanPrompt(ctx: Context, engine: PlanEngine, config: Pla
 }
 
 /** Register the session-start guide and the `/plans` command. */
-export function registerPlanContext(ctx: Context, engine: PlanEngine): void {
-  registerSessionStartGuide(ctx)
+export function registerPlanContext(
+  ctx: Context,
+  engine: PlanEngine,
+  config: Pick<PlanStoreConfig, 'sessionStartGuide'> = { sessionStartGuide: true },
+): void {
+  registerSessionStartGuide(ctx, config.sessionStartGuide)
   registerPlanCommand(ctx, engine)
 }

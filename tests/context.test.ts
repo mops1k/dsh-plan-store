@@ -101,6 +101,22 @@ describe('system-prompt section', () => {
     expect(zeroLimit).not.toContain('Plans currently active')
   })
 
+  it('keeps the default prompt neutral about full-only tools', () => {
+    const text = promptSectionText(harness.engine, harness.config)
+    expect(text).toContain('plan_create')
+    expect(text).toContain('plan_export')
+    for (const name of [
+      'plan_delete',
+      'plan_purge',
+      'plan_phase_delete',
+      'plan_task_delete',
+      'plan_status',
+      'plan_import_session',
+    ]) {
+      expect(text).not.toContain(name)
+    }
+  })
+
   it('reports a failing summary through the error sink', () => {
     const messages: string[] = []
     const broken = { promptSummary: () => { throw new Error('boom') } } as never
@@ -113,7 +129,7 @@ describe('system-prompt section', () => {
 describe('session-start guide', () => {
   it('injects the plan guide into a starting session', () => {
     const { ctx, listeners } = makeContextHarness(harness.workspace)
-    registerPlanContext(ctx, harness.engine)
+    registerPlanContext(ctx, harness.engine, harness.config)
     const listener = listeners.find((entry) => entry.event === 'agent/session-start')
     expect(listener).toBeDefined()
 
@@ -125,12 +141,22 @@ describe('session-start guide', () => {
     expect(injected[0]?.content[0]?.text).toBe(PLAN_STORE_GUIDE)
     expect(PLAN_STORE_GUIDE).toContain('plan_export')
   })
+
+  it('does not register a session-start listener when the startup guide is disabled', () => {
+    const { ctx, listeners, sections, commands } = makeContextHarness(harness.workspace)
+    registerPlanContext(ctx, harness.engine, { ...harness.config, sessionStartGuide: false })
+    registerPlanPrompt(ctx, harness.engine, harness.config)
+
+    expect(listeners.some((entry) => entry.event === 'agent/session-start')).toBe(false)
+    expect(sections).toHaveLength(1)
+    expect(commands.map((command) => command.name)).toEqual(['plans'])
+  })
 })
 
 describe('/plans command', () => {
   it('registers the command and lists, reports and exports plans', async () => {
     const { ctx, commands } = makeContextHarness(harness.workspace)
-    registerPlanContext(ctx, harness.engine)
+    registerPlanContext(ctx, harness.engine, harness.config)
     expect(commands.map((command) => command.name)).toEqual(['plans'])
 
     const created = harness.engine.createPlan({ title: 'Command plan', phases: [{ title: 'Work', tasks: ['a'] }] })

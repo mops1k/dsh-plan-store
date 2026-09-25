@@ -53,11 +53,11 @@ afterEach(() => {
 })
 
 describe('registration', () => {
-  it('registers all sixteen tools', () => {
+  it('registers the exact full tool set by default', () => {
     const { ctx, tools } = makeToolHarness(harness.workspace)
     const registered = registerPlanTools(ctx, harness.engine, harness.config)
-    expect(registered).toEqual([...PLAN_TOOL_NAMES])
-    expect(tools.size).toBe(16)
+    expect([...registered].sort()).toEqual([...PLAN_TOOL_NAMES].sort())
+    expect([...tools.keys()].sort()).toEqual([...PLAN_TOOL_NAMES].sort())
   })
 
   it('skips a tool whose name is already owned and warns', () => {

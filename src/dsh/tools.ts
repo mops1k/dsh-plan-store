@@ -52,6 +52,16 @@ export const PLAN_TOOL_NAMES = [
   'plan_import_session',
 ] as const
 
+/** Tools kept available only to the full agent preset. */
+export const PLAN_FULL_ONLY_TOOL_NAMES = [
+  'plan_delete',
+  'plan_purge',
+  'plan_phase_delete',
+  'plan_task_delete',
+  'plan_status',
+  'plan_import_session',
+] as const
+
 /** Sink for non-fatal registration problems. */
 export interface PlanToolLogger {
   warn(message: string): void

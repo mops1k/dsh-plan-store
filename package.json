@@ -26,6 +26,10 @@
     },
     "./client": {
       "default": "./lib/client.js"
+    },
+    "./tool-restrict": {
+      "types": "./lib/tool-restrict.d.ts",
+      "default": "./lib/tool-restrict.js"
     }
   },
   "files": [

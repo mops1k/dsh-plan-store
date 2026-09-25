@@ -79,6 +79,11 @@ without starting the automatic continuation rounds of the goal driver. A finishe
 clears that goal, and a goal owned by the user or another plugin (a different objective prefix) is left
 untouched. Disable with `syncGoal`.
 
+A scoped lite agent preset can import `dsh-plan-store/tool-restrict`. By default it hides
+`plan_delete`, `plan_purge`, `plan_phase_delete`, `plan_task_delete`, `plan_status`, and
+`plan_import_session` from that preset while leaving the global registrations, Web UI, and
+HTTP API unchanged. The full preset does not mount this row and keeps all sixteen tools.
+
 ## Human command
 
 ```
@@ -125,6 +130,22 @@ POST /api/export
 POST /api/session/goal|todos|import
 ```
 
+## Startup-only profile configuration
+
+The profile patch can disable the redundant session-start guide when the richer system-prompt
+section is always mounted:
+
+```yaml
+- id: dsh-plan-store
+  config:
+    sessionStartGuide: false
+```
+
+This field is intentionally absent from the native Settings card; change it in the profile
+`cordis.patch.yml`, then reload/restart the profile plugin. It is read when the plugin is
+constructed; a live patch reload may do this automatically, but a running plugin does not
+change the listener set in place.
+
 ## Settings
 
 | Option | Default | Meaning |
@@ -170,6 +191,7 @@ pnpm build       # tsc + copy client/client.js -> lib/client.js
 ```
 src/core/       types, paths, config, store (SQLite + FTS5), engine, export, session import mapping
 src/dsh/        tools, context (prompt + /plans), settings, web (HTTP API), session bridge, todo sync, goal sync
+src/tool-restrict.ts  scoped preset restriction subpath
 client/         classic browser module: Plan Board and Goals & Todos views, settings card
 tests/          store, engine, export, tools, context, settings, web, client, import, session state
 ```

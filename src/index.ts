@@ -15,7 +15,7 @@ import { mergeConfig } from './core/config.js'
 import { PlanEngine } from './core/engine.js'
 import { PlanStore } from './core/store.js'
 import { registerPlanContext, registerPlanPrompt } from './dsh/context.js'
-import { PlanStoreSettingsSchema, registerPlanSettings } from './dsh/settings.js'
+import { PlanStorePluginConfigSchema, registerPlanSettings } from './dsh/settings.js'
 import { registerPlanTools } from './dsh/tools.js'
 import { registerPlanWeb } from './dsh/web.js'
 
@@ -26,11 +26,10 @@ export const name = 'dsh-plan-store'
 export const inject = ['tools']
 
 /**
- * Plugin configuration schema (schemastery). Shared verbatim with the native
- * settings namespace, so the composition config and the user-editable settings
- * stay in sync (see `dsh/settings.ts`).
+ * Plugin configuration schema (schemastery). It extends the native settings
+ * schema with startup-only fields that the settings UI deliberately omits.
  */
-export const Config = PlanStoreSettingsSchema
+export const Config = PlanStorePluginConfigSchema
 
 /** Resolved plugin configuration. */
 export type Config = ReturnType<typeof Config>
@@ -63,7 +62,7 @@ export function apply(ctx: Context, config: Config): void {
   ctx.effect(() => () => engine.close())
 
   registerPlanTools(ctx, engine, resolved)
-  registerPlanContext(ctx, engine)
+  registerPlanContext(ctx, engine, resolved)
 
   ctx.inject(['systemPrompt'], (promptCtx) => registerPlanPrompt(promptCtx, engine, resolved))
   ctx.inject(['settings'], (settingsCtx) => registerPlanSettings(settingsCtx, engine, resolved))

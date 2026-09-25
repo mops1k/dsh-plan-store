@@ -1,10 +1,11 @@
 /**
  * dsh settings integration: host half of the plugin configuration.
  *
- * The namespace is registered with the native settings provider so every field
- * (including the editable system prompt) is persisted by the provider and
- * hot-reloaded into the running plugin. The settings card itself is a separate
- * client-side plugin keyed by this namespace; nothing here renders UI.
+ * The namespace is registered with the native settings provider so every
+ * user-editable field is persisted and hot-reloaded into the running plugin.
+ * Startup-only profile fields are intentionally absent from this schema and
+ * live only in the plugin composition config. The settings card itself is a
+ * separate client-side plugin keyed by this namespace; nothing here renders UI.
  *
  * @module dsh-plan-store/dsh/settings
  */
@@ -23,7 +24,7 @@ import type { PlanEngine } from '../core/engine.js'
 /** Settings namespace owned by this plugin (lowercase, hyphenated). */
 export const SETTINGS_NAMESPACE = 'dsh-plan-store'
 
-/** Configuration schema shared by the plugin entry and the settings namespace. */
+/** Native Settings schema, containing only user-editable fields. */
 export const PlanStoreSettingsSchema = z.object({
   storageRoot: z
     .string()
@@ -81,6 +82,15 @@ export const PlanStoreSettingsSchema = z.object({
     .description('System-prompt guidance injected for the agent. Editable in settings.'),
 })
 
+/** Full plugin schema: native Settings fields plus startup-only profile fields. */
+export const PlanStorePluginConfigSchema = z.object({
+  ...PlanStoreSettingsSchema.dict,
+  sessionStartGuide: z
+    .boolean()
+    .default(DEFAULT_CONFIG.sessionStartGuide)
+    .description('Inject the short session-start guide; disable when a richer system prompt is always available.'),
+})
+
 /** Resolved value of the plugin settings namespace. */
 export type PlanStoreSettings = ReturnType<typeof PlanStoreSettingsSchema>
 
@@ -103,7 +113,7 @@ function toSettings(config: PlanStoreConfig): PlanStoreSettings {
 }
 
 /** Merge a settings value over the defaults. */
-function fromSettings(next: PlanStoreSettings): PlanStoreConfig {
+function fromSettings(next: PlanStoreSettings, current: PlanStoreConfig): PlanStoreConfig {
   return mergeConfig({
     storageRoot: next.storageRoot,
     webPath: next.webPath,
@@ -117,6 +127,7 @@ function fromSettings(next: PlanStoreSettings): PlanStoreConfig {
     todoParallelInProgress: next.todoParallelInProgress,
     todoMaxItems: next.todoMaxItems,
     systemPrompt: next.systemPrompt,
+    sessionStartGuide: current.sessionStartGuide,
   })
 }
 
@@ -138,6 +149,7 @@ function applyConfig(target: PlanStoreConfig, next: PlanStoreConfig): void {
   target.todoParallelInProgress = next.todoParallelInProgress
   target.todoMaxItems = next.todoMaxItems
   target.systemPrompt = next.systemPrompt
+  // `sessionStartGuide` is startup-only; changing it requires a plugin reload.
 }
 
 /** Log a warning through the Cordis logger, falling back to the console. */
@@ -170,7 +182,7 @@ export function registerPlanSettings(ctx: Context, engine: PlanEngine, config: P
   }
 
   const apply = (next: PlanStoreSettings): void => {
-    const merged = fromSettings(next)
+    const merged = fromSettings(next, config)
     if (merged.storageRoot !== config.storageRoot) {
       warnSettings(
         ctx,
