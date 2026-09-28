@@ -1619,24 +1619,83 @@ window.__ModuleLoader__.load({
     }
 
     /* ------------------------------------------------------------------ *
+     * settings scope
+     *
+     * dsh >= 0.1.7-rc.2 has no `settingsScope` service: the browser reads and
+     * writes settings namespaces through `ctx.remote.settings`. This adapter
+     * keeps the `{value, status, revision}` snapshot surface the views use.
+     * There is no push channel in the new API, so subscribers are notified on
+     * load and on writes made here; foreign changes arrive on page reload.
+     * ------------------------------------------------------------------ */
+
+    function unavailableScope() {
+      return {
+        getSnapshot: () => ({ value: { webPath: DEFAULT_WEB_PATH }, status: "unavailable", revision: 0 }),
+        subscribe: () => () => {},
+        set: async () => {},
+      };
+    }
+
+    function createSettingsScope(ctx) {
+      const remote = ctx.remote ? ctx.remote.settings : null;
+      if (!remote) return unavailableScope();
+
+      let snapshot = { value: { webPath: DEFAULT_WEB_PATH }, status: "loading", revision: 0 };
+      const listeners = new Set();
+      const publish = () => {
+        for (const listener of Array.from(listeners)) listener(snapshot);
+      };
+      const fail = (message) => {
+        snapshot = { value: snapshot.value, status: "unavailable", revision: snapshot.revision };
+        publish();
+        return message;
+      };
+
+      const load = async () => {
+        try {
+          const response = await remote.describe();
+          if (!response.ok) {
+            fail(response.error.message);
+            return;
+          }
+          const view = (response.value.namespaces || []).find((entry) => entry && entry.ns === NAMESPACE);
+          if (!view) {
+            fail("settings namespace " + NAMESPACE + " is not registered");
+            return;
+          }
+          snapshot = { value: view.value || {}, status: "ready", revision: view.revision || 0 };
+          publish();
+        } catch (exception) {
+          fail(errorText(exception));
+        }
+      };
+      void load();
+
+      return {
+        getSnapshot: () => snapshot,
+        subscribe: (listener) => {
+          listeners.add(listener);
+          listener(snapshot);
+          return () => {
+            listeners.delete(listener);
+          };
+        },
+        set: async (field, value) => {
+          const response = await remote.update(NAMESPACE, { [field]: value }, snapshot.revision);
+          if (!response.ok) throw new Error(response.error.message);
+          snapshot = { value: response.value.value || {}, status: "ready", revision: response.value.revision || 0 };
+          publish();
+        },
+      };
+    }
+
+    /* ------------------------------------------------------------------ *
      * plugin entry
      * ------------------------------------------------------------------ */
 
     function apply(rawContext) {
       const ctx = rawContext;
-      let scope = null;
-      try {
-        scope = ctx.settingsScope.bind({ namespace: NAMESPACE });
-      } catch {
-        scope = null;
-      }
-      if (!scope) {
-        scope = {
-          getSnapshot: () => ({ value: { webPath: DEFAULT_WEB_PATH }, status: "unavailable", revision: 0 }),
-          subscribe: () => () => {},
-          set: async () => {},
-        };
-      }
+      const scope = createSettingsScope(ctx);
 
       const PlanBoard = createBoardView(ctx, scope);
       const GoalsTodos = createGoalsView(ctx, scope);
@@ -1656,7 +1715,7 @@ window.__ModuleLoader__.load({
     }
 
     exports.apply = apply;
-    exports.inject = ["slots", "settingsScope", "sessions"];
+    exports.inject = ["slots", "sessions", "remote", "remote.settings"];
     return module.exports;
   },
 });

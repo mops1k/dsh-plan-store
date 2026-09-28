@@ -42,10 +42,10 @@ function loadClient(): { loaded: LoadedModule[]; exported: Record<string, unknow
 }
 
 /** Build a host context that records slot registrations. */
-function makeClientContext(settingsScope: unknown): { ctx: unknown; slots: RegisteredSlot[] } {
+function makeClientContext(settings: unknown): { ctx: unknown; slots: RegisteredSlot[] } {
   const slots: RegisteredSlot[] = []
   const ctx = {
-    settingsScope,
+    remote: { settings },
     slots: {
       inject(_name: string, callback: () => void): void {
         callback()
@@ -59,14 +59,16 @@ function makeClientContext(settingsScope: unknown): { ctx: unknown; slots: Regis
   return { ctx, slots }
 }
 
-/** Working settings scope stub. */
-function workingScope(): unknown {
+/** One namespace view as the settings remote returns it. */
+function namespaceView(revision: number): unknown {
+  return { ns: 'dsh-plan-store', value: { webPath: '/plan-store' }, revision, applies: 'live' }
+}
+
+/** Working `ctx.remote.settings` stub (dsh >= 0.1.7-rc.2). */
+function workingSettings(): unknown {
   return {
-    bind: () => ({
-      getSnapshot: () => ({ value: { webPath: '/plan-store' }, status: 'ready', revision: 1 }),
-      subscribe: () => () => {},
-      set: async () => {},
-    }),
+    describe: async () => ({ ok: true, value: { writable: true, hasDocument: false, namespaces: [namespaceView(1)] } }),
+    update: async () => ({ ok: true, value: namespaceView(2) }),
   }
 }
 
@@ -76,12 +78,12 @@ describe('client bundle', () => {
     expect(loaded).toHaveLength(1)
     expect(loaded[0]?.id).toBe('dsh-plan-store')
     expect(typeof exported['apply']).toBe('function')
-    expect(exported['inject']).toEqual(['slots', 'settingsScope', 'sessions'])
+    expect(exported['inject']).toEqual(['slots', 'sessions', 'remote', 'remote.settings'])
   })
 
   it('registers the board view, the goals view and the settings card', () => {
     const { exported } = loadClient()
-    const { ctx, slots } = makeClientContext(workingScope())
+    const { ctx, slots } = makeClientContext(workingSettings())
     ;(exported['apply'] as (context: unknown) => void)(ctx)
 
     expect(slots.map((slot) => slot.name)).toEqual([
@@ -118,15 +120,22 @@ describe('client bundle', () => {
     expect(code).not.toContain('--vscode-editor-background')
   })
 
-  it('still applies when the settings scope is unavailable', () => {
+  it('still applies when the settings remote is unavailable', () => {
     const { exported } = loadClient()
-    const broken = {
-      bind: () => {
-        throw new Error('no settings service')
-      },
-    }
-    const { ctx, slots } = makeClientContext(broken)
+    const { ctx, slots } = makeClientContext(undefined)
     expect(() => (exported['apply'] as (context: unknown) => void)(ctx)).not.toThrow()
+    expect(slots).toHaveLength(3)
+  })
+
+  it('still applies when the settings read is refused', async () => {
+    const { exported } = loadClient()
+    const refused = {
+      describe: async () => ({ ok: false, error: { code: 'settings/rejected', message: 'read refused' } }),
+      update: async () => ({ ok: false, error: { code: 'settings/rejected', message: 'write refused' } }),
+    }
+    const { ctx, slots } = makeClientContext(refused)
+    expect(() => (exported['apply'] as (context: unknown) => void)(ctx)).not.toThrow()
+    await new Promise((resolve) => setTimeout(resolve, 0))
     expect(slots).toHaveLength(3)
   })
 })

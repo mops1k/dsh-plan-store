@@ -13,6 +13,9 @@ workspace plan file required by the user's global rules in sync with the databas
   unavailable).
 - A dsh profile with `@deepseek-ai/dsh-tools`, `dsh-system-prompt`, `dsh-host-webserver`,
   `dsh-settings` (all `0.1.5-rc.3` in the tested setup).
+- For the browser half: dsh `>= 0.1.7-rc.2`, where the client reads and writes settings through
+  `ctx.remote.settings`. Earlier releases exposed a `settingsScope` service that no longer exists;
+  on those the client entry stays pending with `waiting for service: settingsScope`.
 
 ## Install
 
