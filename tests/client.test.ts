@@ -19,6 +19,366 @@ interface RegisteredSlot {
   component: unknown
 }
 
+/** One hook slot of the driver below. */
+interface HookSlot {
+  deps?: unknown[]
+  value?: unknown
+  current?: unknown
+}
+
+/** A running board instance driven without a renderer. */
+interface BoardRun {
+  /** Hook values in call order: 0 is the board data state, 1 the filters. */
+  hooks: unknown[]
+  /** Every fetch URL, in the order the calls were made. */
+  requests: string[]
+  /** The element tree of the last render. */
+  tree(): unknown
+  /** Release the pending answer of the request with that index. */
+  answer(index: number): void
+  /** Release every pending answer. */
+  answerAll(): void
+  /** Re-render with other slot props, as the host does when the session changes. */
+  setProps(props: Record<string, unknown>): void
+  /** Put the real fetch back. */
+  restore(): void
+}
+
+/** A plan as the board consumes it, with just enough detail for the tests. */
+interface LitePlan {
+  id: string
+  title: string
+  description: string
+  status: string
+  priority: string
+  workspace: string
+  tags: string[]
+  progress: { total: number; done: number; todo: number; doing: number; blocked: number; percent: number }
+  phases: unknown[]
+}
+
+function apiPlanLite(id: string, workspace: string): LitePlan {
+  return {
+    id,
+    title: id,
+    description: '',
+    status: 'active',
+    priority: 'normal',
+    workspace,
+    tags: [],
+    progress: { total: 0, done: 0, todo: 0, doing: 0, blocked: 0, percent: 0 },
+    phases: [],
+  }
+}
+
+/**
+ * Minimal React with hooks, effects and re-rendering for a single component.
+ * Enough for the Plan Board: no element tree rendering, no DOM.
+ */
+function makeHookDriver(): {
+  React: Record<string, unknown>
+  run(): void
+  setRender(render: () => unknown): void
+  hooks: unknown[]
+  readTree(): unknown
+} {
+  const hooks: unknown[] = []
+  const effects: Array<
+    { deps?: unknown[]; fn: () => (() => void) | void; cleanup?: (() => void) | void; pending: boolean } | undefined
+  > = []
+  const memo: Array<HookSlot | undefined> = []
+  let index = 0
+  let scheduled = false
+  let render: () => unknown = () => null
+  let tree: unknown = null
+
+  const sameDeps = (left?: unknown[], right?: unknown[]): boolean =>
+    Array.isArray(left) &&
+    Array.isArray(right) &&
+    left.length === right.length &&
+    left.every((value, position) => Object.is(value, right[position]))
+
+  const run = (): void => {
+    index = 0
+    tree = render()
+    for (const slot of effects) {
+      if (slot === undefined || !slot.pending) continue
+      slot.pending = false
+      if (typeof slot.cleanup === 'function') slot.cleanup()
+      slot.cleanup = slot.fn()
+    }
+  }
+
+  const rerender = (): void => {
+    if (scheduled) return
+    scheduled = true
+    setTimeout(() => {
+      scheduled = false
+      run()
+    }, 0)
+  }
+
+  const ReactStub = {
+    Fragment: Symbol('Fragment'),
+    createElement: (type: unknown, props: unknown, ...children: unknown[]) => ({ type, props: props ?? {}, children }),
+    useState: (initial: unknown) => {
+      const slot = index++
+      if (!(slot in hooks)) hooks[slot] = typeof initial === 'function' ? (initial as () => unknown)() : initial
+      const set = (value: unknown): void => {
+        const next = typeof value === 'function' ? (value as (previous: unknown) => unknown)(hooks[slot]) : value
+        if (!Object.is(next, hooks[slot])) {
+          hooks[slot] = next
+          rerender()
+        }
+      }
+      return [hooks[slot], set]
+    },
+    useEffect: (fn: () => (() => void) | void, deps?: unknown[]) => {
+      const slot = index++
+      const previous = effects[slot]
+      if (previous === undefined || deps === undefined || !sameDeps(previous.deps, deps)) {
+        effects[slot] = { deps, fn, cleanup: previous?.cleanup, pending: true }
+      }
+    },
+    useMemo: (fn: () => unknown, deps?: unknown[]) => {
+      const slot = index++
+      const held = memo[slot]
+      if (held === undefined || !sameDeps(held.deps, deps)) memo[slot] = { deps, value: fn() }
+      return memo[slot]?.value
+    },
+    useCallback: (fn: unknown, deps?: unknown[]) => {
+      const slot = index++
+      const held = memo[slot]
+      if (held === undefined || !sameDeps(held.deps, deps)) memo[slot] = { deps, value: fn }
+      return memo[slot]?.value
+    },
+    useRef: (value: unknown) => {
+      const slot = index++
+      if (memo[slot] === undefined) memo[slot] = { current: value }
+      return memo[slot]
+    },
+  }
+
+  return {
+    React: ReactStub,
+    run,
+    setRender: (fn) => (render = fn),
+    hooks,
+    readTree: () => tree,
+  }
+}
+
+/** Let pending promises, effects and re-renders settle. */
+async function settle(rounds = 8): Promise<void> {
+  for (let round = 0; round < rounds; round += 1) await new Promise((resolve) => setTimeout(resolve, 0))
+}
+
+/** Depth-first search for a button element with that label. */
+function findButton(node: unknown, label: string): (() => void) | null {
+  if (Array.isArray(node)) {
+    for (const child of node) {
+      const found = findButton(child, label)
+      if (found !== null) return found
+    }
+    return null
+  }
+  if (node === null || typeof node !== 'object') return null
+  const element = node as { props?: Record<string, unknown>; children?: unknown[] }
+  const children = Array.isArray(element.children) ? element.children : []
+  if (children.length === 1 && children[0] === label && typeof element.props?.['onClick'] === 'function') {
+    return element.props['onClick'] as () => void
+  }
+  for (const child of children) {
+    const found = findButton(child, label)
+    if (found !== null) return found
+  }
+  return null
+}
+
+/** Options of one driven slot component. */
+interface ViewOptions {
+  /** Registered conversation view id to mount. */
+  slotId: string
+  /** Standard slot props the host passes, `sessionId` above all. */
+  props?: Record<string, unknown>
+  /** Body of `/api/session/state`, told which session was requested. */
+  sessionState: (requestedSession: string | null) => unknown
+  /** Body of `/api/plans`. */
+  planBody?: (position: number, url: string) => unknown
+}
+
+/**
+ * Run one conversation view against a controllable fetch: every answer stays
+ * pending until the test releases it, so the response order is the test's
+ * decision. The component receives the given slot props, exactly like the host
+ * renders it.
+ */
+function startView(options: ViewOptions): BoardRun {
+  const realFetch = globalThis.fetch
+  const requests: string[] = []
+  const releases: Array<() => void> = []
+  let props: Record<string, unknown> = { ...(options.props ?? { sessionId: 'session-1' }) }
+  globalThis.fetch = ((url: unknown) =>
+    new Promise((resolve) => {
+      const target = String(url)
+      const isSession = target.includes('/api/session/state')
+      const position = requests.length
+      requests.push(target.replace(/^\/plan-store/, ''))
+      const requested = new URL(target, 'http://board.test').searchParams.get('sessionId')
+      releases.push(() =>
+        resolve({
+          ok: true,
+          status: 200,
+          text: async () =>
+            JSON.stringify(
+              isSession ? options.sessionState(requested) : options.planBody ? options.planBody(position, target) : {},
+            ),
+        }),
+      )
+    })) as typeof fetch
+
+  const driver = makeHookDriver()
+  let component: ((props: Record<string, unknown>) => unknown) | undefined
+  driver.setRender(() => component?.(props))
+  const { exported } = loadClient(driver.React)
+  const { ctx, slots } = makeClientContext(workingSettings())
+  ;(exported['apply'] as (context: unknown) => void)(ctx)
+  component = slots.find((slot) => slot.name === 'conversation.view' && slot.id === options.slotId)?.component as
+    | ((props: Record<string, unknown>) => unknown)
+    | undefined
+  if (component === undefined) throw new Error(`the ${options.slotId} view is not registered`)
+  driver.run()
+
+  return {
+    hooks: driver.hooks,
+    requests,
+    tree: driver.readTree,
+    answer: (position) => releases[position]?.(),
+    answerAll: () => {
+      for (const release of releases) release()
+    },
+    setProps: (next) => {
+      props = { ...next }
+      driver.run()
+    },
+    restore: () => {
+      globalThis.fetch = realFetch
+    },
+  }
+}
+
+/**
+ * Run the Plan Board. `sessionWorkspace` is the project the server reports for
+ * the requested session, either fixed or derived from the session id.
+ */
+function startBoard(
+  sessionWorkspace: string | null | ((requestedSession: string | null) => string | null),
+  planAnswers: (position: number, url: string) => unknown,
+  props: Record<string, unknown> = { sessionId: 'session-1' },
+): BoardRun {
+  return startView({
+    slotId: 'plan-board',
+    props,
+    sessionState: (requested) => {
+      const key = typeof sessionWorkspace === 'function' ? sessionWorkspace(requested) : sessionWorkspace
+      return {
+        sessionId: requested ?? '',
+        goal: null,
+        todos: [],
+        candidates: requested === null ? [] : [requested],
+        ...(key === null ? {} : { state: { workspace: { key, root: '/repo' } } }),
+      }
+    },
+    planBody: planAnswers,
+  })
+}
+
+describe('board loading', () => {
+  /** Answer like the real server: honour the workspace query parameter. */
+  const serverAnswer = (_position: number, url: string): unknown => {
+    const workspace = new URL(url, 'http://board.test').searchParams.get('workspace')
+    const all = [apiPlanLite('p_project', 'dsh-plan-store'), apiPlanLite('p_other', 'bookshelf')]
+    const plans = workspace === null ? all : all.filter((plan) => plan.workspace === workspace)
+    return { plans, total: plans.length, workspaces: [{ key: 'dsh-plan-store' }, { key: 'bookshelf' }] }
+  }
+
+  it('loads the board once, already filtered by the session project', async () => {
+    const run = startBoard('dsh-plan-store', serverAnswer)
+    try {
+      await settle()
+      run.answer(0) // the session state resolves first
+      await settle()
+      const boardCalls = run.requests.filter((url) => url.includes('/api/plans'))
+      // Exactly one board request, and it already carries the project filter.
+      expect(boardCalls).toEqual(['/api/plans?limit=200&workspace=dsh-plan-store'])
+      run.answerAll()
+      await settle()
+      const data = run.hooks[0] as { plans: Array<{ id: string; workspace: string }> }
+      expect(data.plans.map((plan) => plan.workspace)).toEqual(['dsh-plan-store'])
+    } finally {
+      run.restore()
+    }
+  })
+
+  it('keeps the filtered answer when the unfiltered one arrives later', async () => {
+    const run = startBoard('dsh-plan-store', serverAnswer)
+    try {
+      await settle()
+      run.answer(0)
+      await settle()
+      // Release the board answers in the hostile order: whatever the board asked
+      // for first lands last. The rendered board must still be the filtered one.
+      const boardCalls = run.requests.length
+      for (let position = boardCalls - 1; position >= 1; position -= 1) {
+        run.answer(position)
+        await settle()
+      }
+      const data = run.hooks[0] as { plans: Array<{ workspace: string }> }
+      expect(data.plans.map((plan) => plan.workspace)).toEqual(['dsh-plan-store'])
+      // The filter shown by the select and sent to the server is the same
+      // derived value, so the request URL is the user-visible filter.
+      const boardRequests = run.requests.filter((url) => url.includes('/api/plans'))
+      expect(boardRequests).toEqual(['/api/plans?limit=200&workspace=dsh-plan-store'])
+    } finally {
+      run.restore()
+    }
+  })
+
+  it('ignores a stale refresh answer that arrives after a newer one', async () => {
+    const run = startBoard('dsh-plan-store', (position) => ({
+      plans: [apiPlanLite(`p_answer_${position}`, 'dsh-plan-store')],
+      total: 1,
+      workspaces: [{ key: 'dsh-plan-store' }],
+    }))
+    try {
+      await settle()
+      run.answer(0)
+      await settle()
+      run.answerAll()
+      await settle()
+
+      const refresh = findButton(run.tree(), 'Refresh')
+      expect(refresh).not.toBeNull()
+      ;(refresh as () => void)()
+      await settle()
+      ;(refresh as () => void)()
+      await settle()
+      const newest = run.requests.length - 1
+      const stale = newest - 1
+      expect(run.requests[newest]).toContain('workspace=dsh-plan-store')
+      // The newest answer lands first, the stale one last: it must be ignored.
+      run.answer(newest)
+      run.answer(stale)
+      await settle()
+      const data = run.hooks[0] as { plans: Array<{ id: string }> }
+      expect(data.plans.map((plan) => plan.id)).toEqual([`p_answer_${newest}`])
+    } finally {
+      run.restore()
+    }
+  })
+})
+
+
 /**
  * Evaluate the classic browser bundle against a stub module loader. `react`
  * defaults to the real React; the markup test passes a hook stub instead, so a
@@ -35,6 +395,9 @@ function loadClient(
         loaded.push(module)
       },
     },
+    // The host page owns the timers the views use (the goals tab polls).
+    setInterval: (): number => 0,
+    clearInterval: (): void => {},
   }
   const run = new Function('window', 'document', code) as (window: unknown, document: unknown) => void
   run(windowStub, undefined)
@@ -52,6 +415,14 @@ function makeClientContext(settings: unknown): { ctx: unknown; slots: Registered
   const slots: RegisteredSlot[] = []
   const ctx = {
     remote: { settings },
+    sessions: {
+      list: {
+        // The real list state has ids/byId/phase/projectionsBySession — and no
+        // `current`, which is exactly why the views must use the slot prop.
+        getSnapshot: () => ({ ids: [], byId: {}, phase: 'ready', projectionsBySession: {} }),
+        subscribe: () => () => {},
+      },
+    },
     slots: {
       inject(_name: string, callback: () => void): void {
         callback()
@@ -107,7 +478,7 @@ describe('client bundle', () => {
     expect(loaded).toHaveLength(1)
     expect(loaded[0]?.id).toBe('dsh-plan-store')
     expect(typeof exported['apply']).toBe('function')
-    expect(exported['inject']).toEqual(['slots', 'sessions', 'remote', 'remote.settings'])
+    expect(exported['inject']).toEqual(['slots', 'remote', 'remote.settings'])
   })
 
   it('registers the board view, the goals view and the settings card', () => {
@@ -261,7 +632,7 @@ function renderBoardWithPhases(): string {
   const board = slots.find((slot) => slot.name === 'conversation.view' && slot.id === 'plan-board')
   const component = board?.component as ((props: Record<string, unknown>) => unknown) | undefined
   if (component === undefined) throw new Error('the board view is not registered')
-  return flattenTree(component())
+  return flattenTree(component({ sessionId: 'session-1' }))
 }
 
 describe('phase collapse', () => {
@@ -304,5 +675,98 @@ describe('phase collapse', () => {
     // The running phase keeps its note and its task cards.
     expect(board).toContain('running notes')
     expect(board).toContain('open task')
+  })
+})
+
+describe('session identity', () => {
+  /** The server reports the project that belongs to the requested session. */
+  const workspaceOfSession = (requested: string | null): string | null =>
+    requested === null ? null : `project-${requested}`
+
+  const plansOf = (_position: number, url: string): unknown => {
+    const workspace = new URL(url, 'http://board.test').searchParams.get('workspace')
+    const all = [apiPlanLite('p_a', 'project-session-a'), apiPlanLite('p_b', 'project-session-b')]
+    const plans = workspace === null ? all : all.filter((plan) => plan.workspace === workspace)
+    return { plans, total: plans.length, workspaces: [{ key: 'project-session-a' }, { key: 'project-session-b' }] }
+  }
+
+  it('reads the project of the session the host handed to the board', async () => {
+    const run = startBoard(workspaceOfSession, plansOf, { sessionId: 'session-a' })
+    try {
+      await settle()
+      // The very first call names the opened session — not "the last live one".
+      expect(run.requests[0]).toBe('/api/session/state?sessionId=session-a')
+      run.answer(0)
+      await settle()
+      expect(run.requests.filter((url) => url.includes('/api/plans'))).toEqual([
+        '/api/plans?limit=200&workspace=project-session-a',
+      ])
+      run.answerAll()
+      await settle()
+      const data = run.hooks[0] as { plans: Array<{ workspace: string }> }
+      expect(data.plans.map((plan) => plan.workspace)).toEqual(['project-session-a'])
+    } finally {
+      run.restore()
+    }
+  })
+
+  it('follows the host when it switches to another session', async () => {
+    const run = startBoard(workspaceOfSession, plansOf, { sessionId: 'session-a' })
+    try {
+      await settle()
+      run.answer(0)
+      await settle()
+      run.answerAll()
+      await settle()
+
+      run.setProps({ sessionId: 'session-b' })
+      await settle()
+      const sessionCalls = run.requests.filter((url) => url.includes('/api/session/state'))
+      expect(sessionCalls).toEqual([
+        '/api/session/state?sessionId=session-a',
+        '/api/session/state?sessionId=session-b',
+      ])
+      // Release the new session's project, then let the board ask again.
+      run.answer(run.requests.length - 1)
+      await settle()
+      run.answerAll()
+      await settle()
+      const boardCalls = run.requests.filter((url) => url.includes('/api/plans'))
+      expect(boardCalls[boardCalls.length - 1]).toBe('/api/plans?limit=200&workspace=project-session-b')
+      const data = run.hooks[0] as { plans: Array<{ workspace: string }> }
+      expect(data.plans.map((plan) => plan.workspace)).toEqual(['project-session-b'])
+    } finally {
+      run.restore()
+    }
+  })
+
+  it('reads the goal and todo state of the session handed to the goals tab', async () => {
+    const run = startView({
+      slotId: 'goals-todos',
+      props: { sessionId: 'session-a' },
+      sessionState: (requested) => ({
+        sessionId: requested ?? '',
+        candidates: requested === null ? [] : [requested],
+        state: {
+          sessionId: requested ?? '',
+          goal: null,
+          todos: [],
+          workspace: requested === null ? undefined : { key: `project-${requested}`, root: '/repo' },
+        },
+      }),
+    })
+    try {
+      await settle()
+      expect(run.requests[0]).toBe('/api/session/state?sessionId=session-a')
+      run.answerAll()
+      await settle()
+      // The tab keeps the identity it was rendered with, not the last live one.
+      const state = run.hooks.find(
+        (hook) => typeof hook === 'object' && hook !== null && 'goal' in (hook as Record<string, unknown>),
+      ) as { sessionId?: string } | undefined
+      expect(state?.sessionId).toBe('session-a')
+    } finally {
+      run.restore()
+    }
   })
 })

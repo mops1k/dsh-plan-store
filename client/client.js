@@ -149,22 +149,15 @@ window.__ModuleLoader__.load({
       return Array.isArray(value) ? value.join("\n") : "";
     }
 
-    function currentSessionId(ctx) {
-      try {
-        const snapshot = ctx.sessions.list.getSnapshot();
-        const current = snapshot ? snapshot.current : null;
-        return typeof current === "string" && current.length > 0 ? current : null;
-      } catch {
-        return null;
-      }
-    }
-
-    function subscribeSessions(ctx, callback) {
-      try {
-        return ctx.sessions.list.subscribe(callback);
-      } catch {
-        return null;
-      }
+    /**
+     * Identity of the session a view is rendered for. The host hands it to every
+     * entry of a session-scoped slot as the standard `sessionId` prop; without
+     * it the plugin cannot tell which session is open, and the server would fall
+     * back to "the last live session" of the process.
+     */
+    function sessionIdOf(props) {
+      const value = props && props.sessionId;
+      return typeof value === "string" && value.length > 0 ? value : null;
     }
 
     /* ------------------------------------------------------------------ *
@@ -452,12 +445,15 @@ window.__ModuleLoader__.load({
      * ------------------------------------------------------------------ */
 
     function createBoardView(ctx, scope) {
-      return function PlanBoard() {
+      return function PlanBoard(props) {
+        const sessionId = sessionIdOf(props);
         const [data, setData] = React.useState({ plans: [], total: 0, workspaces: [] });
         const [filters, setFilters] = React.useState({ workspace: "", status: "all", query: "", includeArchived: false });
         // The board opens on the project of the current session; an explicit
-        // choice by the user always wins.
+        // choice by the user always wins. `sessionResolved` tells whether that
+        // project is already known — a failed lookup resolves the board too.
         const [sessionWorkspace, setSessionWorkspace] = React.useState(null);
+        const [sessionResolved, setSessionResolved] = React.useState(false);
         const [workspaceChosen, setWorkspaceChosen] = React.useState(false);
         const [busy, setBusy] = React.useState(false);
         const [error, setError] = React.useState("");
@@ -470,46 +466,55 @@ window.__ModuleLoader__.load({
         // rest (backlog, done, archived) collapsed. Kept in memory on purpose:
         // a page reload returns to the default view.
         const [laneOpen, setLaneOpen] = React.useState({});
-
         // Manual phase toggles (phase id -> explicitly open). Without an entry
         // a phase follows the task default: every task done -> collapsed.
         const [phaseOpen, setPhaseOpen] = React.useState({});
+
+        // The filter of the board: the user's own choice once they touched the
+        // select, the session project until then. Derived instead of copied into
+        // `filters` by a second effect, so the very first request already carries
+        // the project — copying it in an effect used to send an unfiltered
+        // request first and let the slower answer decide what the board shows.
+        const workspace = workspaceChosen ? filters.workspace : sessionWorkspace || "";
+        // Do not load before the project is known (or the user chose one), so an
+        // unfiltered answer can never land on top of the filtered one.
+        const workspaceReady = sessionResolved || workspaceChosen;
+
         const query = React.useMemo(() => {
           const parts = ["limit=200"];
-          if (filters.workspace) parts.push("workspace=" + encodeURIComponent(filters.workspace));
+          if (workspace) parts.push("workspace=" + encodeURIComponent(workspace));
           if (filters.status && filters.status !== "all") parts.push("status=" + encodeURIComponent(filters.status));
           if (filters.query) parts.push("query=" + encodeURIComponent(filters.query));
           if (filters.includeArchived) parts.push("includeArchived=true");
           return "/api/plans?" + parts.join("&");
-        }, [filters.workspace, filters.status, filters.query, filters.includeArchived]);
+        }, [workspace, filters.status, filters.query, filters.includeArchived]);
 
+        // The project is re-read whenever the host switches the session.
         React.useEffect(() => {
           let cancelled = false;
+          // A new session: wait for its project again instead of querying the
+          // board with the project of the session we just left.
+          setSessionWorkspace(null);
+          setSessionResolved(false);
           const resolveSessionWorkspace = async () => {
-            const sessionId = currentSessionId(ctx);
             try {
               const suffix = sessionId ? "?sessionId=" + encodeURIComponent(sessionId) : "";
               const payload = await apiGet(scope, "/api/session/state" + suffix);
               const key = payload && payload.state && payload.state.workspace ? payload.state.workspace.key : null;
-              if (!cancelled) setSessionWorkspace(typeof key === "string" && key.length > 0 ? key : null);
+              if (cancelled) return;
+              setSessionWorkspace(typeof key === "string" && key.length > 0 ? key : null);
+              setSessionResolved(true);
             } catch {
-              if (!cancelled) setSessionWorkspace(null);
+              if (cancelled) return;
+              setSessionWorkspace(null);
+              setSessionResolved(true);
             }
           };
           resolveSessionWorkspace();
-          const unsubscribe = subscribeSessions(ctx, resolveSessionWorkspace);
           return () => {
             cancelled = true;
-            if (unsubscribe) unsubscribe();
           };
-        }, []);
-
-        React.useEffect(() => {
-          if (sessionWorkspace === null || workspaceChosen) return;
-          setFilters((previous) =>
-            previous.workspace === "" ? Object.assign({}, previous, { workspace: sessionWorkspace }) : previous,
-          );
-        }, [sessionWorkspace, workspaceChosen]);
+        }, [sessionId]);
 
         const workspaceOptions = React.useMemo(() => {
           const keys = data.workspaces.map((workspace) => workspace.key);
@@ -517,22 +522,30 @@ window.__ModuleLoader__.load({
           return [""].concat(keys);
         }, [data.workspaces, sessionWorkspace]);
 
+        // Answers can come back out of order (a filter change, two fast
+        // refreshes): only the newest request is allowed to touch the board.
+        const requestSeq = React.useRef(0);
+
         const load = React.useCallback(async () => {
+          if (!workspaceReady) return;
+          const seq = requestSeq.current + 1;
+          requestSeq.current = seq;
           setBusy(true);
           setError("");
           try {
             const payload = await apiGet(scope, query);
+            if (requestSeq.current !== seq) return;
             setData({
               plans: Array.isArray(payload.plans) ? payload.plans : [],
               total: typeof payload.total === "number" ? payload.total : 0,
               workspaces: Array.isArray(payload.workspaces) ? payload.workspaces : [],
             });
           } catch (loadError) {
-            setError("Cannot load plans: " + errorText(loadError));
+            if (requestSeq.current === seq) setError("Cannot load plans: " + errorText(loadError));
           } finally {
-            setBusy(false);
+            if (requestSeq.current === seq) setBusy(false);
           }
-        }, [query]);
+        }, [query, workspaceReady]);
 
         React.useEffect(() => {
           load();
@@ -842,7 +855,7 @@ window.__ModuleLoader__.load({
             "div",
             { style: S.toolbar },
             h(Select, {
-              value: filters.workspace,
+              value: workspace,
               options: workspaceOptions,
               labels: { "": "All workspaces" },
               onChange: (value) => {
@@ -1221,8 +1234,10 @@ window.__ModuleLoader__.load({
     ];
 
     function createGoalsView(ctx, scope) {
-      return function GoalsTodos() {
-        const [sessionId, setSessionId] = React.useState(() => currentSessionId(ctx));
+      return function GoalsTodos(props) {
+        // The host renders this tab for the open session, so its standard prop
+        // decides which session's goal and todos are shown.
+        const sessionId = sessionIdOf(props);
         const [state, setState] = React.useState(null);
         const [candidates, setCandidates] = React.useState([]);
         const [busy, setBusy] = React.useState(false);
@@ -1230,15 +1245,6 @@ window.__ModuleLoader__.load({
         const [notice, setNotice] = React.useState("");
         const [draft, setDraft] = React.useState("");
         const [modal, setModal] = React.useState(null);
-
-        React.useEffect(() => {
-          const sync = () => setSessionId(currentSessionId(ctx));
-          const unsubscribe = subscribeSessions(ctx, sync);
-          sync();
-          return () => {
-            if (unsubscribe) unsubscribe();
-          };
-        }, []);
 
         const load = React.useCallback(async () => {
           setBusy(true);
@@ -1767,7 +1773,7 @@ window.__ModuleLoader__.load({
     }
 
     exports.apply = apply;
-    exports.inject = ["slots", "sessions", "remote", "remote.settings"];
+    exports.inject = ["slots", "remote", "remote.settings"];
     // Pure collapse decisions, exported so tests/client.test.ts can exercise
     // them directly; the dsh host only consumes `apply` and `inject`.
     exports.internals = { phaseIsComplete, phaseCollapsed };
