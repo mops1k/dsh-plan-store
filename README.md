@@ -102,7 +102,11 @@ HTTP API unchanged. The full preset does not mount this row and keeps all sixtee
   drag&drop, per-plan progress, filters (workspace, status, text, archived), task and plan drawers
   with the journal, and create/edit/export/archive actions. Inactive plans (`backlog`, `done`,
   `archived`) start collapsed as a single header row with a `▸`/`▾` toggle; `active` and `blocked`
-  lanes start expanded, and manual toggles last until the page reloads.
+  lanes start expanded, and manual toggles last until the page reloads. Phases collapse the same way
+  (toggle button or a click on the phase title): a phase whose tasks are all done starts collapsed as
+  a header-only row, `todo`/`doing`/`blocked` phases start expanded, and a manual toggle of a phase
+  also lasts until the page reloads. Open phases render their status columns and accept dropped
+  cards; collapsed phases do not.
 - **Goals & Todos** — the current session's goal (resume/pause/complete/block/edit) and todo list
   (status cycling, add, remove) with an **Import into plan** button.
 - **Settings → Plan Board** — the settings card for the namespace below.

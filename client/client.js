@@ -108,6 +108,24 @@ window.__ModuleLoader__.load({
       return String(progress.done || 0) + "/" + String(progress.total || 0);
     }
 
+    /** Whether every task of the phase is done (an empty phase is not). */
+    function phaseIsComplete(phase) {
+      const progress = phase && phase.progress ? phase.progress : null;
+      if (!progress || typeof progress.total !== "number" || typeof progress.done !== "number") return false;
+      return progress.total > 0 && progress.done === progress.total;
+    }
+
+    /**
+     * Whether one phase renders collapsed right now. An explicit user choice
+     * (phase id -> explicitly open) wins; otherwise finished phases start
+     * collapsed, the same way inactive plan lanes do.
+     */
+    function phaseCollapsed(phaseOpen, phase) {
+      const id = phase && typeof phase.id === "string" ? phase.id : "";
+      if (id.length > 0 && Object.prototype.hasOwnProperty.call(phaseOpen, id)) return !phaseOpen[id];
+      return phaseIsComplete(phase);
+    }
+
     function byPosition(left, right) {
       const a = typeof left.position === "number" ? left.position : 0;
       const b = typeof right.position === "number" ? right.position : 0;
@@ -262,6 +280,7 @@ window.__ModuleLoader__.load({
         padding: "8px 10px",
       },
       phaseHead: { display: "flex", flexWrap: "wrap", gap: "8px", alignItems: "center", marginBottom: "6px" },
+      phaseTitle: { fontSize: "12px" },
       columns: { display: "grid", gridTemplateColumns: "repeat(4, minmax(140px, 1fr))", gap: "8px" },
       column: {
         border: "1px solid var(--dsw-alias-border-l1, rgba(127,127,127,0.25))",
@@ -452,6 +471,9 @@ window.__ModuleLoader__.load({
         // a page reload returns to the default view.
         const [laneOpen, setLaneOpen] = React.useState({});
 
+        // Manual phase toggles (phase id -> explicitly open). Without an entry
+        // a phase follows the task default: every task done -> collapsed.
+        const [phaseOpen, setPhaseOpen] = React.useState({});
         const query = React.useMemo(() => {
           const parts = ["limit=200"];
           if (filters.workspace) parts.push("workspace=" + encodeURIComponent(filters.workspace));
@@ -627,14 +649,33 @@ window.__ModuleLoader__.load({
             ),
           );
 
-        const renderPhase = (plan, phase) =>
-          h(
+        const renderPhase = (plan, phase) => {
+          const collapsed = phaseCollapsed(phaseOpen, phase);
+          return h(
             "div",
             { key: phase.id, style: S.phase },
             h(
               "div",
               { style: S.phaseHead },
-              h("strong", { style: { fontSize: "12px" } }, phase.title),
+              h(
+                "button",
+                {
+                  type: "button",
+                  style: S.button,
+                  title: collapsed ? "Expand phase" : "Collapse phase",
+                  "aria-expanded": !collapsed,
+                  onClick: () => togglePhase(phase),
+                },
+                collapsed ? "\u25B8" : "\u25BE",
+              ),
+              h(
+                "strong",
+                {
+                  style: Object.assign({}, S.phaseTitle, { cursor: "pointer" }),
+                  onClick: () => togglePhase(phase),
+                },
+                phase.title,
+              ),
               h("span", { style: S.badge }, phase.status),
               h("span", { style: S.muted }, progressLabel(phase.progress)),
               h("div", { style: S.spacer }),
@@ -657,35 +698,46 @@ window.__ModuleLoader__.load({
                 "Delete phase",
               ),
             ),
-            phase.notes ? h("div", { style: S.laneNote }, truncate(phase.notes, 180)) : null,
-            h(
-              "div",
-              { style: S.columns },
-              TASK_STATUSES.map((status) => {
-                const tasks = (phase.tasks || []).filter((task) => task.status === status).sort(byPosition);
-                return h(
-                  "div",
-                  {
-                    key: status,
-                    style: S.column,
-                    onDragOver: (event) => {
-                      event.preventDefault();
-                      event.dataTransfer.dropEffect = "move";
-                    },
-                    onDrop: (event) => {
-                      event.preventDefault();
-                      const id = event.dataTransfer.getData("text/plain") || dragging;
-                      setDragging(null);
-                      if (!id) return;
-                      moveTask(id, status, phase.id, undefined);
-                    },
-                  },
-                  h("div", { style: S.columnHead }, TASK_STATUS_LABELS[status] + " (" + tasks.length + ")"),
-                  tasks.map((task) => renderCard(task, phase)),
-                );
-              }),
-            ),
+            collapsed
+              ? null
+              : h(React.Fragment, null, [
+                  phase.notes
+                    ? h("div", { key: "note", style: S.laneNote }, truncate(phase.notes, 180))
+                    : null,
+                  h(
+                    "div",
+                    { key: "columns", style: S.columns },
+                    TASK_STATUSES.map((status) => {
+                      const tasks = (phase.tasks || []).filter((task) => task.status === status).sort(byPosition);
+                      return h(
+                        "div",
+                        {
+                          key: status,
+                          style: S.column,
+                          onDragOver: (event) => {
+                            event.preventDefault();
+                            event.dataTransfer.dropEffect = "move";
+                          },
+                          onDrop: (event) => {
+                            event.preventDefault();
+                            const id = event.dataTransfer.getData("text/plain") || dragging;
+                            setDragging(null);
+                            if (!id) return;
+                            moveTask(id, status, phase.id, undefined);
+                          },
+                        },
+                        h("div", { style: S.columnHead }, TASK_STATUS_LABELS[status] + " (" + tasks.length + ")"),
+                        tasks.map((task) => renderCard(task, phase)),
+                      );
+                    }),
+                  ),
+                ]),
           );
+        };
+
+        /** Flip one phase, remembering the user's explicit choice. */
+        const togglePhase = (phase) =>
+          setPhaseOpen((previous) => Object.assign({}, previous, { [phase.id]: phaseCollapsed(previous, phase) }));
 
         /** Whether one plan lane renders collapsed right now. */
         const laneCollapsed = (plan) =>
@@ -1716,6 +1768,9 @@ window.__ModuleLoader__.load({
 
     exports.apply = apply;
     exports.inject = ["slots", "sessions", "remote", "remote.settings"];
+    // Pure collapse decisions, exported so tests/client.test.ts can exercise
+    // them directly; the dsh host only consumes `apply` and `inject`.
+    exports.internals = { phaseIsComplete, phaseCollapsed };
     return module.exports;
   },
 });
