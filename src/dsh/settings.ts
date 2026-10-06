@@ -1,25 +1,21 @@
 /**
  * dsh settings integration: host half of the plugin configuration.
  *
- * The namespace is registered with the native settings provider so every
- * user-editable field is persisted and hot-reloaded into the running plugin.
- * Startup-only profile fields are intentionally absent from this schema and
- * live only in the plugin composition config. The settings card itself is a
- * separate client-side plugin keyed by this namespace; nothing here renders UI.
+ * Since dsh 0.2.0 a plugin's settings *are* its Loader config:
+ * {@link PlanStorePluginConfigSchema} is exported as the plugin `Config`, the
+ * values live in the profile patch, and cordis applies an edit by re-activating
+ * the fiber with the new config — so there is no namespace to register and no
+ * scope to watch here. What this function still owns is the page policy:
+ * whether the editor may autogenerate a settings page for this instance.
+ * Startup-only profile fields stay in the composition config.
  *
  * @module dsh-plan-store/dsh/settings
  */
 import type { Context } from '@deepseek-ai/cordis'
-import type { SettingsScope } from '@deepseek-ai/dsh-settings'
+import type { SettingsForms } from '@deepseek-ai/dsh-settings'
 import z from '@deepseek-ai/schemastery'
 
-import {
-  DEFAULT_CONFIG,
-  DEFAULT_SYSTEM_PROMPT,
-  mergeConfig,
-  type PlanStoreConfig,
-} from '../core/config.js'
-import type { PlanEngine } from '../core/engine.js'
+import { DEFAULT_CONFIG, DEFAULT_SYSTEM_PROMPT } from '../core/config.js'
 
 /** Settings namespace owned by this plugin (lowercase, hyphenated). */
 export const SETTINGS_NAMESPACE = 'dsh-plan-store'
@@ -91,67 +87,6 @@ export const PlanStorePluginConfigSchema = z.object({
     .description('Inject the short session-start guide; disable when a richer system prompt is always available.'),
 })
 
-/** Resolved value of the plugin settings namespace. */
-export type PlanStoreSettings = ReturnType<typeof PlanStoreSettingsSchema>
-
-/** Project the resolved engine config onto the settings shape. */
-function toSettings(config: PlanStoreConfig): PlanStoreSettings {
-  return {
-    storageRoot: config.storageRoot,
-    webPath: config.webPath,
-    exportDir: config.exportDir,
-    autoExport: config.autoExport,
-    promptActivePlans: config.promptActivePlans,
-    promptActiveLimit: config.promptActiveLimit,
-    stalePlanDays: config.stalePlanDays,
-    syncTodos: config.syncTodos,
-    syncGoal: config.syncGoal,
-    todoParallelInProgress: config.todoParallelInProgress,
-    todoMaxItems: config.todoMaxItems,
-    systemPrompt: config.systemPrompt,
-  }
-}
-
-/** Merge a settings value over the defaults. */
-function fromSettings(next: PlanStoreSettings, current: PlanStoreConfig): PlanStoreConfig {
-  return mergeConfig({
-    storageRoot: next.storageRoot,
-    webPath: next.webPath,
-    exportDir: next.exportDir,
-    autoExport: next.autoExport,
-    promptActivePlans: next.promptActivePlans,
-    promptActiveLimit: next.promptActiveLimit,
-    stalePlanDays: next.stalePlanDays,
-    syncTodos: next.syncTodos,
-    syncGoal: next.syncGoal,
-    todoParallelInProgress: next.todoParallelInProgress,
-    todoMaxItems: next.todoMaxItems,
-    systemPrompt: next.systemPrompt,
-    sessionStartGuide: current.sessionStartGuide,
-  })
-}
-
-/**
- * Copy resolved values into a live config object that the tools, the prompt
- * provider and the engine read on every call, so a settings change takes effect
- * without a restart. `storageRoot` is applied for reporting only: the SQLite
- * store already owns its directory, so a root change needs a plugin restart.
- */
-function applyConfig(target: PlanStoreConfig, next: PlanStoreConfig): void {
-  target.webPath = next.webPath
-  target.exportDir = next.exportDir
-  target.autoExport = next.autoExport
-  target.promptActivePlans = next.promptActivePlans
-  target.promptActiveLimit = next.promptActiveLimit
-  target.stalePlanDays = next.stalePlanDays
-  target.syncTodos = next.syncTodos
-  target.syncGoal = next.syncGoal
-  target.todoParallelInProgress = next.todoParallelInProgress
-  target.todoMaxItems = next.todoMaxItems
-  target.systemPrompt = next.systemPrompt
-  // `sessionStartGuide` is startup-only; changing it requires a plugin reload.
-}
-
 /** Log a warning through the Cordis logger, falling back to the console. */
 function warnSettings(ctx: Context, message: string): void {
   try {
@@ -162,42 +97,23 @@ function warnSettings(ctx: Context, message: string): void {
 }
 
 /**
- * Register the plugin settings namespace (host half) and hot-reload changes
- * into the live configuration object.
+ * Register this plugin instance's settings page policy.
+ *
+ * The values themselves come from the Loader config and are applied by cordis
+ * re-activating the plugin fiber, so nothing is watched here; the call only
+ * tells the native configuration editor that it may autogenerate the page for
+ * this instance. The owning fiber is passed explicitly because the service
+ * would otherwise attribute the policy to its own fiber, which collides with
+ * every other plugin that calls `configure` without an owner.
  *
  * @param ctx - context carrying the `settings` service.
- * @param engine - live engine whose own config backs the prompt and the reports.
- * @param config - shared resolved config read by the tools and the prompt section.
  */
-export function registerPlanSettings(ctx: Context, engine: PlanEngine, config: PlanStoreConfig): void {
-  let scope: SettingsScope<PlanStoreSettings>
+export function registerPlanSettings(ctx: Context): void {
+  const forms: SettingsForms = ctx.settings
   try {
-    scope = ctx.settings.register(SETTINGS_NAMESPACE, PlanStoreSettingsSchema, {
-      base: toSettings(config),
-      applies: 'live',
-    })
+    const dispose = forms.configure({ auto: true }, ctx.fiber)
+    ctx.effect(() => dispose)
   } catch (error) {
-    warnSettings(ctx, `Settings namespace "${SETTINGS_NAMESPACE}" was not registered: ${String(error)}`)
-    return
+    warnSettings(ctx, `Settings page for "${SETTINGS_NAMESPACE}" was not registered: ${String(error)}`)
   }
-
-  const apply = (next: PlanStoreSettings): void => {
-    const merged = fromSettings(next, config)
-    if (merged.storageRoot !== config.storageRoot) {
-      warnSettings(
-        ctx,
-        'storageRoot changed: the plan store keeps its current database until the plugin restarts.',
-      )
-    }
-    applyConfig(config, merged)
-    applyConfig(engine.config, merged)
-  }
-
-  try {
-    scope.watch((next) => apply(next))
-  } catch (error) {
-    warnSettings(ctx, `Settings watcher for "${SETTINGS_NAMESPACE}" was not installed: ${String(error)}`)
-  }
-
-  apply(scope.get())
 }

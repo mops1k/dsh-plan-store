@@ -130,7 +130,7 @@ describe('session-start guide', () => {
   it('injects the plan guide into a starting session', () => {
     const { ctx, listeners } = makeContextHarness(harness.workspace)
     registerPlanContext(ctx, harness.engine, harness.config)
-    const listener = listeners.find((entry) => entry.event === 'agent/session-start')
+    const listener = listeners.find((entry) => entry.event === 'agent/created')
     expect(listener).toBeDefined()
 
     const injected: Array<{ content: Array<{ type: string; text?: string }> }> = []
@@ -147,7 +147,7 @@ describe('session-start guide', () => {
     registerPlanContext(ctx, harness.engine, { ...harness.config, sessionStartGuide: false })
     registerPlanPrompt(ctx, harness.engine, harness.config)
 
-    expect(listeners.some((entry) => entry.event === 'agent/session-start')).toBe(false)
+    expect(listeners.some((entry) => entry.event === 'agent/created')).toBe(false)
     expect(sections).toHaveLength(1)
     expect(commands.map((command) => command.name)).toEqual(['plans'])
   })

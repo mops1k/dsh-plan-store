@@ -203,6 +203,26 @@ client/         classic browser module: Plan Board and Goals & Todos views, sett
 tests/          store, engine, export, tools, context, settings, web, client, import, session state
 ```
 
+## Compatibility with DSH upgrades
+
+Since DSH 0.2.0-rc.2 the profile loader skips a whole bundle whose
+`@deepseek-ai/dsh*` peerDependencies do not satisfy the running runtime
+(`evaluatePluginCompatibility` in `@deepseek-ai/dsh-app-boot`), so the plugin
+silently disappears from the session. Every DSH peer is therefore declared as
+`workspace:^`, which the loader always reads as the current runtime, and
+`scripts/check-dsh-compat.mjs` verifies both the peer ranges and the runtime
+symbols the plugin reaches for.
+
+After every DSH upgrade run:
+
+```sh
+pnpm check:dsh
+pnpm typecheck
+pnpm test
+```
+
+Then restart DSH.
+
 ## Limitations
 
 - Goal and todo are session state, not a store: only live sessions can be shown or modified.

@@ -65,6 +65,6 @@ export function apply(ctx: Context, config: Config): void {
   registerPlanContext(ctx, engine, resolved)
 
   ctx.inject(['systemPrompt'], (promptCtx) => registerPlanPrompt(promptCtx, engine, resolved))
-  ctx.inject(['settings'], (settingsCtx) => registerPlanSettings(settingsCtx, engine, resolved))
+  ctx.inject(['settings'], (settingsCtx) => registerPlanSettings(settingsCtx))
   ctx.inject(['webServer'], (webCtx) => registerPlanWeb(webCtx, engine, resolved))
 }

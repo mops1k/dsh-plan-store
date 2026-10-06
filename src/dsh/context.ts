@@ -18,6 +18,18 @@ import type { PlanStoreConfig } from '../core/config.js'
 import type { PlanEngine } from '../core/engine.js'
 import { archiveWorkspaceSession, sessionCwd } from './session.js'
 
+/**
+ * Declare this plugin's own message source. Since dsh 0.2.0 the source map is
+ * merge-extensible and deliberately has no shared catch-all `plugin` kind, so
+ * every producer registers its own.
+ */
+declare module '@deepseek-ai/dsh-llm' {
+  interface MessageSourceMap {
+    /** Short plan guide injected by this plugin when an agent is created. */
+    'dsh-plan-store': { kind: 'dsh-plan-store' }
+  }
+}
+
 /** Plugin name used as the injected-context source. */
 const PLUGIN_NAME = 'dsh-plan-store'
 
@@ -86,20 +98,21 @@ function registerSystemPrompt(ctx: Context, engine: PlanEngine, config: PlanStor
   }
 }
 
-/** Inject the short plan guide when an agent session starts. */
+/** Inject the short plan guide when an agent is created. */
 function registerSessionStartGuide(ctx: Context, enabled: boolean): void {
   if (!enabled) return
-  ctx.on('agent/session-start', (payload: { agent: Agent }) => {
+  ctx.on('agent/created', ({ agent }) => {
     try {
-      payload.agent.inject(
+      agent.inject(
         createUserMessage({
           content: [{ type: 'text', text: PLAN_STORE_GUIDE }],
-          source: { kind: 'plugin', plugin: PLUGIN_NAME },
+          source: { kind: PLUGIN_NAME },
         }),
       )
     } catch (error) {
       warnContext(ctx, `Failed to inject the plan guide: ${errorMessage(error)}`)
     }
+    return undefined
   })
 }
 
