@@ -105,14 +105,7 @@ describe('system-prompt section', () => {
     const text = promptSectionText(harness.engine, harness.config)
     expect(text).toContain('plan_create')
     expect(text).toContain('plan_export')
-    for (const name of [
-      'plan_delete',
-      'plan_purge',
-      'plan_phase_delete',
-      'plan_task_delete',
-      'plan_status',
-      'plan_import_session',
-    ]) {
+    for (const name of ['plan_delete', 'plan_phase_delete', 'plan_task_delete', 'plan_status']) {
       expect(text).not.toContain(name)
     }
   })

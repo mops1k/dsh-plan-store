@@ -1,11 +1,11 @@
 /**
  * Model-facing `plan_*` tools registered on `ctx.tools`.
  *
- * Fifteen tools map onto {@link PlanEngine} operations: create/list/get/search,
- * update, soft delete, purge, phase and task mutations, export and status.
- * Every tool is autonomous — it performs the requested operation without asking
- * the user for confirmation — except `plan_purge`, whose irreversibility is
- * gated behind an explicit `confirm: true` argument.
+ * Fourteen tools map onto {@link PlanEngine} operations: create/list/get/search,
+ * update, soft delete, phase and task mutations, export and status. Every tool
+ * is autonomous — it performs the requested operation without asking the user
+ * for confirmation. `plan_purge` and `plan_import_session` keep their engine and
+ * HTTP/UI surfaces but are no longer model-facing (see {@link PLAN_TOOL_NAMES}).
  *
  * The workspace of a call is derived from the calling session's working
  * directory (see `./session.ts`), so `plan_create` binds a plan to its project
@@ -32,7 +32,14 @@ import { resolveWorkspace } from './session.js'
 import { readSessionState } from './session-state.js'
 import { syncPlanTodos } from './todo-sync.js'
 
-/** Every tool name this plugin owns. */
+/**
+ * Every tool name this plugin owns.
+ *
+ * `plan_purge` and `plan_import_session` are deliberately NOT model-facing:
+ * their schemas cost tokens on every request and they were never called
+ * (0 of 19 706 recorded tool calls, 2026-10-12). The engine methods and the
+ * HTTP/UI surfaces that drive them stay available.
+ */
 export const PLAN_TOOL_NAMES = [
   'plan_create',
   'plan_list',
@@ -40,7 +47,6 @@ export const PLAN_TOOL_NAMES = [
   'plan_search',
   'plan_update',
   'plan_delete',
-  'plan_purge',
   'plan_phase_add',
   'plan_phase_update',
   'plan_phase_delete',
@@ -49,17 +55,14 @@ export const PLAN_TOOL_NAMES = [
   'plan_task_delete',
   'plan_export',
   'plan_status',
-  'plan_import_session',
 ] as const
 
 /** Tools kept available only to the full agent preset. */
 export const PLAN_FULL_ONLY_TOOL_NAMES = [
   'plan_delete',
-  'plan_purge',
   'plan_phase_delete',
   'plan_task_delete',
   'plan_status',
-  'plan_import_session',
 ] as const
 
 /** Sink for non-fatal registration problems. */
@@ -627,39 +630,6 @@ export function registerPlanTools(ctx: Context, engine: PlanEngine, config: Plan
 
   register(
     defineTool({
-      name: 'plan_purge',
-      description: 'Delete a plan with its phases, tasks and journal for good. Irreversible: confirm=true is required.',
-      parameters: {
-        id: { type: 'string', required: true, description: 'Plan id (p_…).' },
-        confirm: { type: 'boolean', required: true, description: 'Must be true; otherwise the call is rejected.' },
-      },
-      output: {
-        schema: {
-          type: 'object',
-          additionalProperties: false,
-          properties: {
-            text: TEXT_FIELD,
-            id: { type: 'string', required: true, description: 'Purged plan id.' },
-            purged: { type: 'boolean', required: true, description: 'True when the plan was removed.' },
-          },
-        },
-        render: (_args, value) => [{ type: 'text', text: value.text }],
-      },
-      execute: async (args, exec) => {
-        const purged = engine.purgePlan(args.id, args.confirm)
-        if (purged) syncPlanTodos(ctx, exec, null, args.id, config)
-        if (purged) syncPlanGoal(ctx, exec, null, config)
-        return {
-          text: purged ? `Purged plan ${args.id} with all of its phases and tasks.` : `Plan ${args.id} was not found.`,
-          id: args.id,
-          purged,
-        }
-      },
-    }),
-  )
-
-  register(
-    defineTool({
       name: 'plan_phase_add',
       description: 'Add a phase to a plan, optionally with task titles. Returns the new phase id.',
       parameters: {
@@ -973,61 +943,6 @@ export function registerPlanTools(ctx: Context, engine: PlanEngine, config: Plan
       },
     }),
   )
-
-  register(
-    defineTool({
-      name: 'plan_import_session',
-      description:
-        'Import the goal and todo list of the current session into a plan: the goal becomes the title, todos become tasks. Idempotent — re-running refreshes that plan.',
-      parameters: {
-        sessionId: { type: 'string', description: 'Session to import; defaults to the calling session.' },
-        refresh: {
-          type: 'boolean',
-          description: 'Refresh an already imported plan instead of leaving it untouched (default true).',
-        },
-        workspace: { type: 'string', description: 'Workspace key; defaults to the session project.' },
-      },
-      output: {
-        schema: {
-          type: 'object',
-          additionalProperties: false,
-          properties: {
-            text: TEXT_FIELD,
-            plan: PLAN_FIELD,
-            progress: PROGRESS_SCHEMA,
-            created: { type: 'boolean', required: true, description: 'True when a new plan was created.' },
-          },
-        },
-        render: (_args, value) => [{ type: 'text', text: value.text }],
-      },
-      execute: async (args, exec) => {
-        const sessionId = (args.sessionId ?? sessionIdOf(exec) ?? '').trim()
-        if (sessionId.length === 0) {
-          throw new PlanError('invalid', 'No session to import; pass sessionId explicitly.')
-        }
-        const snapshot = readSessionState(ctx, sessionId)
-        const workspace = resolveWorkspace(ctx, exec, args.workspace)
-        const result = engine.importSession(snapshot, workspace, args.refresh !== false)
-        const tree = result.tree
-        const phase = tree.phases[0]
-        const counts =
-          result.actions === null
-            ? ''
-            : `\n${snapshot.todos.length} todo item(s): +${result.actions.add.length} / ~${result.actions.update.length} / -${result.actions.remove.length}`
-        syncPlanTodos(ctx, exec, tree, tree.id, config)
-        syncPlanGoal(ctx, exec, tree, config)
-        return {
-          text: `${result.created ? 'Imported session' : 'Refreshed plan from session'} ${sessionId}.\n${headline(tree)}\n${
-            phase === undefined ? '' : phaseLine(phase)
-          }${counts}`.trimEnd(),
-          plan: treeJson(tree),
-          progress: progressJson(tree.progress),
-          created: result.created,
-        }
-      },
-    }),
-  )
-
   return registered
 }
 

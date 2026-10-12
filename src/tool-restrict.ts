@@ -20,11 +20,9 @@ export const inject = ['tools']
 
 const FULL_ONLY_TOOL_SCHEMA = z.union([
   z.const('plan_delete'),
-  z.const('plan_purge'),
   z.const('plan_phase_delete'),
   z.const('plan_task_delete'),
   z.const('plan_status'),
-  z.const('plan_import_session'),
 ])
 
 /** Scoped restriction configuration. */

@@ -61,11 +61,11 @@ describe('registration', () => {
   })
 
   it('skips a tool whose name is already owned and warns', () => {
-    const { ctx, tools, warnings } = makeToolHarness(harness.workspace, ['plan_create', 'plan_purge'])
+    const { ctx, tools, warnings } = makeToolHarness(harness.workspace, ['plan_create', 'plan_delete'])
     const registered = registerPlanTools(ctx, harness.engine, harness.config)
     expect(registered).not.toContain('plan_create')
-    expect(registered).not.toContain('plan_purge')
-    expect(registered).toHaveLength(14)
+    expect(registered).not.toContain('plan_delete')
+    expect(registered).toHaveLength(PLAN_TOOL_NAMES.length - 2)
     expect(warnings).toHaveLength(2)
     expect(tools.has('plan_list')).toBe(true)
   })
@@ -197,7 +197,7 @@ describe('listing, search and status', () => {
 })
 
 describe('archive, purge and export', () => {
-  it('archives, restores and purges with an explicit confirmation', async () => {
+  it('archives and restores a plan', async () => {
     const { ctx, tools } = makeToolHarness(harness.workspace)
     registerPlanTools(ctx, harness.engine, harness.config)
     const created = await call(tools, 'plan_create', { title: 'Lifecycle' })
@@ -210,10 +210,6 @@ describe('archive, purge and export', () => {
 
     const restored = await call(tools, 'plan_update', { id: planId, status: 'backlog' })
     expect((restored['plan'] as { status: string }).status).toBe('backlog')
-
-    await expect(call(tools, 'plan_purge', { id: planId, confirm: false })).rejects.toThrow(/confirm/u)
-    const purged = await call(tools, 'plan_purge', { id: planId, confirm: true })
-    expect(purged['purged']).toBe(true)
   })
 
   it('exports the plan into the session workspace', async () => {
