@@ -139,6 +139,10 @@ export interface PlanSummary extends Plan {
   progress: PlanProgress
   /** First task that is `doing`, else the first `todo`, else null. */
   nextTask: Task | null
+  /** Characters of task notes; the dominant cost of reading the plan. */
+  notesChars: number
+  /** Estimate of the full markdown tree, in characters, for choosing a read. */
+  chars: number
 }
 
 /** One full-text search hit. */
@@ -174,6 +178,10 @@ export interface PlanStatusReport {
   byTaskStatus: Record<TaskStatus, number>
   phaseCount: number
   taskCount: number
+  /** Characters of task notes across the reported plans; the rendering cost. */
+  notesChars: number
+  /** Up to three non-archived plans with the largest note bodies, biggest first. */
+  largest: PlanSummary[]
   /** Non-archived plans untouched for longer than `stalePlanDays`. */
   stale: PlanSummary[]
   fts: boolean

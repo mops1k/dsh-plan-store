@@ -91,14 +91,45 @@ describe('system-prompt section', () => {
 
     const withSummary = promptSectionText(harness.engine, harness.config)
     expect(withSummary).toContain('Plans currently active or blocked in the store:')
-    expect(withSummary).toContain('(demo)')
-    expect(withSummary).toContain('next: a')
+    expect(withSummary).toContain('[active] Active plan')
 
     const disabled = promptSectionText(harness.engine, { ...harness.config, promptActivePlans: false })
     expect(disabled).not.toContain('Plans currently active')
 
     const zeroLimit = promptSectionText(harness.engine, { ...harness.config, promptActiveLimit: 0 })
     expect(zeroLimit).not.toContain('Plans currently active')
+  })
+
+  it('scopes the section summary to the session workspace', () => {
+    const demo = harness.engine.createPlan({ title: 'Demo plan', workspace: 'demo', phases: [{ title: 'Work', tasks: ['a'] }] })
+    harness.engine.updateTask(demo.phases[0]!.tasks[0]!.id, { status: 'doing' })
+    const other = harness.engine.createPlan({ title: 'Other plan', workspace: 'other', phases: [{ title: 'Work', tasks: ['b'] }] })
+    harness.engine.updateTask(other.phases[0]!.tasks[0]!.id, { status: 'doing' })
+
+    const { ctx, sections } = makeContextHarness('/home/dev/demo')
+    registerPlanPrompt(ctx, harness.engine, harness.config)
+    const assembly = { agent: { session: { header: { cwd: '/home/dev/demo' } } } }
+    const text = typeof sections[0]?.text === 'function' ? sections[0].text(assembly as never) : String(sections[0]?.text)
+
+    expect(text).toContain('Demo plan')
+    expect(text).not.toContain('Other plan')
+  })
+
+  it('keeps the section text stable while task progress changes', () => {
+    const created = harness.engine.createPlan({
+      title: 'Stable plan',
+      workspace: 'demo',
+      phases: [{ title: 'Work', tasks: ['a', 'b'] }],
+    })
+    const [firstTask, secondTask] = created.phases[0]!.tasks
+    harness.engine.updateTask(firstTask!.id, { status: 'doing' })
+
+    const before = promptSectionText(harness.engine, harness.config)
+    harness.engine.updateTask(secondTask!.id, { status: 'done' })
+    const after = promptSectionText(harness.engine, harness.config)
+
+    expect(before).toContain('Stable plan')
+    expect(after).toBe(before)
   })
 
   it('keeps the default prompt neutral about full-only tools', () => {
@@ -120,9 +151,9 @@ describe('system-prompt section', () => {
 })
 
 describe('session-start guide', () => {
-  it('injects the plan guide into a starting session', () => {
+  it('injects the plan guide into a starting session when it is enabled', () => {
     const { ctx, listeners } = makeContextHarness(harness.workspace)
-    registerPlanContext(ctx, harness.engine, harness.config)
+    registerPlanContext(ctx, harness.engine, { ...harness.config, sessionStartGuide: true })
     const listener = listeners.find((entry) => entry.event === 'agent/created')
     expect(listener).toBeDefined()
 
@@ -133,6 +164,13 @@ describe('session-start guide', () => {
     expect(injected).toHaveLength(1)
     expect(injected[0]?.content[0]?.text).toBe(PLAN_STORE_GUIDE)
     expect(PLAN_STORE_GUIDE).toContain('plan_export')
+  })
+
+  it('registers no session-start listener by default', () => {
+    const { ctx, listeners } = makeContextHarness(harness.workspace)
+    registerPlanContext(ctx, harness.engine, harness.config)
+    expect(harness.config.sessionStartGuide).toBe(false)
+    expect(listeners.some((entry) => entry.event === 'agent/created')).toBe(false)
   })
 
   it('does not register a session-start listener when the startup guide is disabled', () => {

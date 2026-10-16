@@ -89,6 +89,15 @@ export interface ExportResult {
   tree: PlanTree
 }
 
+/** Assumed characters of the rendered plan header (id line, progress, description). */
+const RENDER_HEADER_CHARS = 200
+
+/** Assumed characters of one rendered task line. */
+const RENDER_TASK_CHARS = 60
+
+/** Assumed characters of one rendered phase header. */
+const RENDER_PHASE_CHARS = 80
+
 /** Normalize a list of tags: trimmed, non-empty, unique. */
 function normalizeTags(values: readonly string[] | undefined): string[] {
   const out: string[] = []
@@ -633,8 +642,18 @@ export class PlanEngine {
     return this.store.listEvents(planId, limit)
   }
 
-  /** Export one plan as markdown into the workspace. */
-  exportPlan(id: string, options: OperationOptions & { workspaceRoot?: string; exportDir?: string } = {}): ExportResult {
+  /**
+   * Export one plan as markdown into the workspace.
+   *
+   * `recordEvent: false` is what the automatic export after every mutation
+   * passes: a plan edited many times would otherwise collect one journal row
+   * per edit, and the journal tail is what `plan_get` shows. The file itself is
+   * written either way.
+   */
+  exportPlan(
+    id: string,
+    options: OperationOptions & { workspaceRoot?: string; exportDir?: string; recordEvent?: boolean } = {},
+  ): ExportResult {
     const tree = this.requireTree(id)
     const workspaceRoot = (options.workspaceRoot ?? tree.workspaceRoot).trim()
     if (workspaceRoot.length === 0) {
@@ -645,7 +664,9 @@ export class PlanEngine {
     const result = exportPlanToWorkspace(tree, { workspaceRoot, exportDir, exportedAt })
     this.transaction(() => {
       this.store.updatePlanRow(id, { export_path: result.path, updated_at: exportedAt })
-      this.recordEvent(id, 'export', `Exported to ${result.path}`, { path: result.path }, options.sessionId ?? tree.sessionId, exportedAt)
+      if (options.recordEvent !== false) {
+        this.recordEvent(id, 'export', `Exported to ${result.path}`, { path: result.path }, options.sessionId ?? tree.sessionId, exportedAt)
+      }
     })
     return { path: result.path, tree: this.requireTree(id) }
   }
@@ -669,22 +690,39 @@ export class PlanEngine {
       byTaskStatus,
       phaseCount: rows.phases,
       taskCount: rows.tasks,
+      notesChars: plans.reduce((sum, plan) => sum + plan.notesChars, 0),
+      largest: [...plans]
+        .sort((left, right) => right.notesChars - left.notesChars || left.id.localeCompare(right.id))
+        .slice(0, 3),
       stale,
       fts: this.store.ftsEnabled,
     }
   }
 
-  /** Compact one-line summaries of the plans worth putting into the prompt. */
+  /**
+   * Compact one-line summaries of the plans worth putting into the prompt.
+   *
+   * The lines are deliberately stable: no task counters and no `next:` task,
+   * and the order ignores `updated_at`. Every change of the returned text makes
+   * the harness append a fresh copy of the whole system prompt to the
+   * conversation history, so a digest that moved on every task edit would cost
+   * a prompt copy per edit. The workspace tag is added only in the cross-project
+   * view, where it disambiguates plans of the same title.
+   */
   promptSummary(workspace: string | undefined, limit: number): string[] {
     if (limit <= 0) return []
-    const { plans } = this.listPlans({ status: 'all', includeArchived: false, limit: 100, ...(workspace !== undefined && workspace.length > 0 ? { workspace } : {}) })
+    const scoped = workspace !== undefined && workspace.length > 0
+    const { plans } = this.listPlans({ status: 'all', includeArchived: false, limit: 100, ...(scoped ? { workspace } : {}) })
     return plans
       .filter((plan) => plan.status === 'active' || plan.status === 'blocked')
+      .sort((left, right) => {
+        const byAge = right.createdAt.localeCompare(left.createdAt)
+        return byAge !== 0 ? byAge : left.id.localeCompare(right.id)
+      })
       .slice(0, limit)
       .map((plan) => {
-        const next = plan.nextTask === null ? 'no open task' : `next: ${plan.nextTask.title}`
-        const scope = plan.workspace.length > 0 ? ` (${plan.workspace})` : ''
-        return `${plan.id} · [${plan.status}] ${plan.title}${scope} — ${plan.progress.done}/${plan.progress.total} tasks, ${next}`
+        const scope = !scoped && plan.workspace.length > 0 ? ` (${plan.workspace})` : ''
+        return `${plan.id} · [${plan.status}] ${plan.title}${scope}`
       })
   }
 
@@ -733,12 +771,15 @@ export class PlanEngine {
   /** Project a plan row plus its tasks onto a list row. */
   private toSummary(plan: Plan, tasks: Task[], phaseCount: number): PlanSummary {
     const nextTask = tasks.find((task) => task.status === 'doing') ?? tasks.find((task) => task.status === 'todo') ?? null
+    const notesChars = tasks.reduce((sum, task) => sum + task.notes.length, 0)
     return {
       ...plan,
       phaseCount,
       taskCount: tasks.length,
       progress: progressOf(tasks),
       nextTask,
+      notesChars,
+      chars: RENDER_HEADER_CHARS + notesChars + tasks.length * RENDER_TASK_CHARS + phaseCount * RENDER_PHASE_CHARS,
     }
   }
 
