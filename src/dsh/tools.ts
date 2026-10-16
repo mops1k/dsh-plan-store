@@ -256,6 +256,8 @@ function summaryJson(plan: PlanSummary) {
     taskCount: plan.taskCount,
     progress: progressJson(plan.progress),
     nextTask: plan.nextTask === null ? null : taskJson(plan.nextTask),
+    notesChars: plan.notesChars,
+    chars: plan.chars,
   }
 }
 
@@ -276,6 +278,13 @@ function progressLabel(progress: PlanProgress): string {
   return `${progress.done}/${progress.total} done (${progress.percent}%)`
 }
 
+/** Compact character count: `940`, `12.3k` or `162k`. */
+function charsLabel(value: number): string {
+  if (value >= 10000) return `${Math.round(value / 1000)}k`
+  if (value >= 1000) return `${(value / 1000).toFixed(1)}k`
+  return String(value)
+}
+
 /** One-line plan header used by the markdown renderings. */
 function planLine(plan: Plan | PlanSummary): string {
   const parts = [`${plan.id} · ${plan.title}`, `[${plan.status}]`]
@@ -285,32 +294,120 @@ function planLine(plan: Plan | PlanSummary): string {
   return parts.join(' · ')
 }
 
-/** Render a plan tree as markdown. */
-function treeText(tree: PlanTree): string {
-  const lines = [planLine(tree), `Progress: ${progressLabel(tree.progress)}`]
-  if (tree.description.trim().length > 0) lines.push('', tree.description.trim())
-  if (tree.exportPath !== null) lines.push('', `Exported: ${tree.exportPath}`)
+/** Default character budget of a rendered plan tree (≈1.7k tokens). */
+const TREE_MAX_CHARS = 6000
+
+/** Characters kept from one note inside a budgeted tree. */
+const TREE_NOTE_CHARS = 200
+
+/** Shortest clipped note that is still worth printing. */
+const TREE_MIN_NOTE_CHARS = 40
+
+/** How much room the clipping marker may take inside the budget. */
+const TREE_MARKER_CHARS = 160
+
+/** How a tree render spends its character budget. */
+interface TreeTextOptions {
+  /** Budget of the whole rendering; `0` means unbounded. */
+  maxChars?: number
+  /** Per-note clip limit; `0` keeps the default (unbounded without a budget). */
+  noteChars?: number
+}
+
+/** Mandatory lines of one phase or task plus its optional free text. */
+interface TreeBlock {
+  core: string[]
+  notes: string[]
+}
+
+/** Clip free text to `limit` characters, reporting whether anything was lost. */
+function clipNote(text: string, limit: number): { text: string; clipped: boolean } {
+  if (text.length <= limit) return { text, clipped: false }
+  return { text: `${text.slice(0, Math.max(0, limit - 1)).trimEnd()}…`, clipped: true }
+}
+
+/** Split a plan tree into mandatory blocks and optional free-text lines. */
+function treeBlocks(tree: PlanTree): TreeBlock[] {
+  const blocks: TreeBlock[] = []
   for (const [index, phase] of tree.phases.entries()) {
-    lines.push('', `## Phase ${index + 1}: ${phase.title} (${phase.id}) [${phase.status}] — ${progressLabel(phase.progress)}`)
-    if (phase.notes.trim().length > 0) lines.push(phase.notes.trim())
-    if (phase.tasks.length === 0) {
-      lines.push('_No tasks._')
-      continue
-    }
+    const core = [`## Phase ${index + 1}: ${phase.title} (${phase.id}) [${phase.status}] — ${progressLabel(phase.progress)}`]
+    if (phase.tasks.length === 0) core.push('_No tasks._')
+    blocks.push({ core: ['', ...core], notes: phase.notes.trim().length > 0 ? [phase.notes.trim()] : [] })
     for (const task of phase.tasks) {
-      lines.push(taskLine(task))
-      if (task.notes.trim().length > 0) lines.push(`  ${task.notes.trim()}`)
-      if (task.links.length > 0) lines.push(`  links: ${task.links.join(', ')}`)
+      const notes: string[] = []
+      if (task.notes.trim().length > 0) notes.push(`  ${task.notes.trim()}`)
+      if (task.links.length > 0) notes.push(`  links: ${task.links.join(', ')}`)
+      blocks.push({ core: [taskLine(task)], notes })
     }
   }
-  if (tree.phases.length === 0) lines.push('', '_No phases._')
-  if (tree.events.length > 0) {
-    lines.push('', 'Recent events:')
-    for (const event of tree.events.slice(0, 5)) {
-      lines.push(`- ${event.createdAt} ${event.kind}: ${event.message}`)
+  if (tree.phases.length === 0) blocks.push({ core: ['', '_No phases._'], notes: [] })
+  return blocks
+}
+
+/** Journal tail lines of a plan tree. */
+function eventLines(tree: PlanTree): string[] {
+  if (tree.events.length === 0) return []
+  const lines = ['', 'Recent events:']
+  for (const event of tree.events.slice(0, 5)) lines.push(`- ${event.createdAt} ${event.kind}: ${event.message}`)
+  return lines
+}
+
+/**
+ * Render a plan tree as markdown within a character budget.
+ *
+ * The lines that carry identity — the plan header, every phase line and every
+ * task line with its id — are never dropped: without an id the agent cannot ask
+ * for the details. Only the free text (description, notes, links) is clipped,
+ * and a final marker names how much was left out and how to read one node in
+ * full. A tree whose identity lines alone exceed the budget still renders
+ * complete — the budget is a target, not a promise — and `0` disables it.
+ */
+function treeText(tree: PlanTree, options: TreeTextOptions = {}): string {
+  const budget = Math.trunc(options.maxChars ?? TREE_MAX_CHARS)
+  const maxChars = budget > 0 ? budget : Number.POSITIVE_INFINITY
+  const requestedNote = options.noteChars === undefined ? 0 : Math.trunc(options.noteChars)
+  const noteChars =
+    requestedNote > 0
+      ? Math.max(TREE_MIN_NOTE_CHARS, requestedNote)
+      : Number.isFinite(maxChars)
+        ? TREE_NOTE_CHARS
+        : Number.POSITIVE_INFINITY
+  const head = [planLine(tree), `Progress: ${progressLabel(tree.progress)}`]
+  const description = tree.description.trim()
+  if (description.length > 0) head.push('', description)
+  if (tree.exportPath !== null) head.push('', `Exported: ${tree.exportPath}`)
+  const blocks = treeBlocks(tree)
+  const cost = (lines: readonly string[]): number => lines.reduce((sum, line) => sum + line.length + 1, 0)
+
+  const coreCost = cost(head) + blocks.reduce((sum, block) => sum + cost(block.core), 0)
+  const events = coreCost + cost(eventLines(tree)) <= maxChars ? eventLines(tree) : []
+  const hasNotes = blocks.some((block) => block.notes.length > 0)
+  let remaining = Math.max(0, maxChars - coreCost - cost(events) - (hasNotes ? TREE_MARKER_CHARS : 0))
+
+  const out = [...head]
+  let clipped = 0
+  for (const block of blocks) {
+    out.push(...block.core)
+    for (const line of block.notes) {
+      const room = Math.min(noteChars, remaining)
+      if (room < TREE_MIN_NOTE_CHARS) {
+        clipped += 1
+        continue
+      }
+      const short = clipNote(line, room)
+      out.push(short.text)
+      remaining -= short.text.length + 1
+      if (short.clipped) clipped += 1
     }
   }
-  return lines.join('\n')
+  out.push(...events)
+  if (clipped > 0) {
+    out.push(
+      '',
+      `[${clipped} note/link line(s) clipped to keep this rendering small — read one task in full with plan_get { id, taskId }, or the exported markdown file]`,
+    )
+  }
+  return out.join('\n')
 }
 
 /** Compact headline of a plan: identity, status and progress. */
@@ -349,7 +446,9 @@ function listText(plans: PlanSummary[], total: number): string {
   if (plans.length === 0) return 'No plans match the filter.'
   const lines = plans.map((plan) => {
     const next = plan.nextTask === null ? 'no open task' : `next: ${plan.nextTask.title}`
-    return `- ${planLine(plan)} — ${progressLabel(plan.progress)} — ${next}`
+    // A row stays short unless reading the plan is actually expensive.
+    const size = plan.chars >= 4000 ? ` — tree: ~${charsLabel(plan.chars)} chars (${charsLabel(plan.notesChars)} notes)` : ''
+    return `- ${planLine(plan)} — ${progressLabel(plan.progress)} — ${next}${size}`
   })
   lines.push('', `${plans.length} of ${total} plan(s) shown.`)
   return lines.join('\n')
@@ -361,6 +460,74 @@ function hitsText(hits: SearchHit[]): string {
   return hits
     .map((hit) => `- [${hit.kind}] ${hit.title} (${hit.id}) — ${hit.snippet}`)
     .join('\n')
+}
+
+/** Result of the automatic export that follows a mutation. */
+interface AutoExport {
+  path: string
+  tree: PlanTree
+}
+
+/**
+ * Export the plan after a mutation when `autoExport` is on.
+ *
+ * The markdown copy has to exist either way — the global rules require
+ * `.dsh/plans/<slug>.md` — but asking the model for a `plan_export` call after
+ * every change costs a whole extra model step, and a step re-sends the entire
+ * conversation. Writing the file here removes that step: the mutation's own
+ * result carries the path. Failures are logged and never fail the mutation, and
+ * the automatic path records no journal event (a status flip must not add a
+ * row and shift the plan's journal tail). The plan's own workspace root wins so
+ * a call from another project cannot move the file.
+ */
+function autoExportPlan(
+  ctx: Context,
+  engine: PlanEngine,
+  config: PlanStoreConfig,
+  tree: PlanTree,
+  exec: unknown,
+): AutoExport | null {
+  if (!config.autoExport) return null
+  const own = tree.workspaceRoot.trim()
+  const root = own.length > 0 ? own : resolveWorkspace(ctx, exec).root.trim()
+  if (root.length === 0) return null
+  try {
+    return engine.exportPlan(tree.id, {
+      workspaceRoot: root,
+      exportDir: config.exportDir,
+      recordEvent: false,
+    })
+  } catch (error) {
+    warnTool(ctx, `Automatic export of ${tree.id} into ${root} failed: ${errorMessage(error)}`)
+    return null
+  }
+}
+
+/**
+ * Finish a mutating tool call: export the plan, mirror it into the session todo
+ * and goal panels, and build the result payload.
+ *
+ * @param text - the mutation's own rendering, without the export line.
+ * @returns the tool result, with `Exported: <path>` appended when the file was
+ *   written.
+ */
+function mutationResult(
+  ctx: Context,
+  exec: unknown,
+  engine: PlanEngine,
+  config: PlanStoreConfig,
+  tree: PlanTree,
+  text: string,
+): { text: string; plan: ReturnType<typeof treeJson>; progress: ReturnType<typeof progressJson> } {
+  const exported = autoExportPlan(ctx, engine, config, tree, exec)
+  const shown = exported?.tree ?? tree
+  syncPlanTodos(ctx, exec, shown, shown.id, config)
+  syncPlanGoal(ctx, exec, shown, config)
+  return {
+    text: exported === null ? text : `${text}\nExported: ${exported.path}`,
+    plan: treeJson(shown),
+    progress: progressJson(shown.progress),
+  }
 }
 
 /* ------------------------------------------------------------------ *
@@ -458,13 +625,7 @@ export function registerPlanTools(ctx: Context, engine: PlanEngine, config: Plan
           },
           { sessionId: exec.agent?.id === undefined ? null : String(exec.agent.id) },
         )
-        syncPlanTodos(ctx, exec, tree, tree.id, config)
-        syncPlanGoal(ctx, exec, tree, config)
-        return {
-          text: `Created plan.\n\n${treeText(tree)}`,
-          plan: treeJson(tree),
-          progress: progressJson(tree.progress),
-        }
+        return mutationResult(ctx, exec, engine, config, tree, `Created plan.\n\n${treeText(tree)}`)
       },
     }),
   )
@@ -518,10 +679,13 @@ export function registerPlanTools(ctx: Context, engine: PlanEngine, config: Plan
   register(
     defineTool({
       name: 'plan_get',
-      description: 'Read one plan as a full tree: phases, tasks, progress and recent journal entries.',
+      description: 'Read a plan tree (id lines always, notes clipped) or one task/phase in full.',
       parameters: {
         id: { type: 'string', required: true, description: 'Plan id (p_…).' },
         eventLimit: { type: 'integer', description: 'How many journal entries to include (default 20).' },
+        maxChars: { type: 'integer', description: `Character budget; 0 disables it (default ${TREE_MAX_CHARS}).` },
+        taskId: { type: 'string', description: 'Read only this task (t_…) in full.' },
+        phaseId: { type: 'string', description: 'Read only this phase (ph_…) in full.' },
       },
       output: {
         schema: {
@@ -533,7 +697,20 @@ export function registerPlanTools(ctx: Context, engine: PlanEngine, config: Plan
       },
       execute: async (args) => {
         const tree = engine.requireTree(args.id, args.eventLimit ?? 20)
-        return { text: treeText(tree), plan: treeJson(tree), progress: progressJson(tree.progress) }
+        const maxChars = args.maxChars ?? TREE_MAX_CHARS
+        if (args.taskId !== undefined) {
+          const found = findTask(tree, args.taskId)
+          if (found === null) throw new PlanError('not_found', `Task not found in plan ${tree.id}: ${args.taskId}`)
+          const focused: PlanTree = { ...tree, phases: [{ ...found.phase, tasks: [found.task] }], events: [] }
+          return { text: treeText(focused, { maxChars, noteChars: maxChars }), plan: treeJson(tree), progress: progressJson(tree.progress) }
+        }
+        if (args.phaseId !== undefined) {
+          const phase = findPhase(tree, args.phaseId)
+          if (phase === null) throw new PlanError('not_found', `Phase not found in plan ${tree.id}: ${args.phaseId}`)
+          const focused: PlanTree = { ...tree, phases: [phase], events: [] }
+          return { text: treeText(focused, { maxChars, noteChars: maxChars }), plan: treeJson(tree), progress: progressJson(tree.progress) }
+        }
+        return { text: treeText(tree, { maxChars }), plan: treeJson(tree), progress: progressJson(tree.progress) }
       },
     }),
   )
@@ -597,9 +774,7 @@ export function registerPlanTools(ctx: Context, engine: PlanEngine, config: Plan
           ...(args.workspace !== undefined ? { workspace: args.workspace } : {}),
         }
         const tree = engine.updatePlan(args.id, patch, { sessionId: sessionIdOf(exec) })
-        syncPlanTodos(ctx, exec, tree, tree.id, config)
-        syncPlanGoal(ctx, exec, tree, config)
-        return { text: `Updated plan.\n${headline(tree)}`, plan: treeJson(tree), progress: progressJson(tree.progress) }
+        return mutationResult(ctx, exec, engine, config, tree, `Updated plan.\n${headline(tree)}`)
       },
     }),
   )
@@ -621,9 +796,7 @@ export function registerPlanTools(ctx: Context, engine: PlanEngine, config: Plan
       },
       execute: async (args, exec) => {
         const tree = engine.archivePlan(args.id, { sessionId: sessionIdOf(exec) })
-        syncPlanTodos(ctx, exec, tree, tree.id, config)
-        syncPlanGoal(ctx, exec, tree, config)
-        return { text: `Archived plan ${tree.id}.`, plan: treeJson(tree), progress: progressJson(tree.progress) }
+        return mutationResult(ctx, exec, engine, config, tree, `Archived plan ${tree.id}.`)
       },
     }),
   )
@@ -662,13 +835,14 @@ export function registerPlanTools(ctx: Context, engine: PlanEngine, config: Plan
           { sessionId: sessionIdOf(exec) },
         )
         const addedPhase = tree.phases.find((phase) => !before.has(phase.id)) ?? null
-        syncPlanTodos(ctx, exec, tree, tree.id, config)
-        syncPlanGoal(ctx, exec, tree, config)
-        return {
-          text: `Added phase.\n${headline(tree)}\n${addedPhase === null ? '' : phaseLine(addedPhase)}`.trimEnd(),
-          plan: treeJson(tree),
-          progress: progressJson(tree.progress),
-        }
+        return mutationResult(
+          ctx,
+          exec,
+          engine,
+          config,
+          tree,
+          `Added phase.\n${headline(tree)}\n${addedPhase === null ? '' : phaseLine(addedPhase)}`.trimEnd(),
+        )
       },
     }),
   )
@@ -701,13 +875,14 @@ export function registerPlanTools(ctx: Context, engine: PlanEngine, config: Plan
         }
         const tree = engine.updatePhase(args.id, patch, { sessionId: sessionIdOf(exec) })
         const changedPhase = findPhase(tree, args.id)
-        syncPlanTodos(ctx, exec, tree, tree.id, config)
-        syncPlanGoal(ctx, exec, tree, config)
-        return {
-          text: `Updated phase.\n${headline(tree)}\n${changedPhase === null ? '' : phaseLine(changedPhase)}`.trimEnd(),
-          plan: treeJson(tree),
-          progress: progressJson(tree.progress),
-        }
+        return mutationResult(
+          ctx,
+          exec,
+          engine,
+          config,
+          tree,
+          `Updated phase.\n${headline(tree)}\n${changedPhase === null ? '' : phaseLine(changedPhase)}`.trimEnd(),
+        )
       },
     }),
   )
@@ -729,9 +904,7 @@ export function registerPlanTools(ctx: Context, engine: PlanEngine, config: Plan
       },
       execute: async (args, exec) => {
         const tree = engine.deletePhase(args.id, { sessionId: sessionIdOf(exec) })
-        syncPlanTodos(ctx, exec, tree, tree.id, config)
-        syncPlanGoal(ctx, exec, tree, config)
-        return { text: `Deleted phase.\n${headline(tree)}`, plan: treeJson(tree), progress: progressJson(tree.progress) }
+        return mutationResult(ctx, exec, engine, config, tree, `Deleted phase.\n${headline(tree)}`)
       },
     }),
   )
@@ -777,13 +950,14 @@ export function registerPlanTools(ctx: Context, engine: PlanEngine, config: Plan
           tree.phases
             .flatMap((phase) => phase.tasks.map((task) => ({ phase, task })))
             .find((entry) => !before.has(entry.task.id)) ?? null
-        syncPlanTodos(ctx, exec, tree, tree.id, config)
-        syncPlanGoal(ctx, exec, tree, config)
-        return {
-          text: `Added task.\n${headline(tree)}\n${addedTask === null ? '' : taskLine(addedTask.task)}`.trimEnd(),
-          plan: treeJson(tree),
-          progress: progressJson(tree.progress),
-        }
+        return mutationResult(
+          ctx,
+          exec,
+          engine,
+          config,
+          tree,
+          `Added task.\n${headline(tree)}\n${addedTask === null ? '' : taskLine(addedTask.task)}`.trimEnd(),
+        )
       },
     }),
   )
@@ -820,13 +994,14 @@ export function registerPlanTools(ctx: Context, engine: PlanEngine, config: Plan
         }
         const tree = engine.updateTask(args.id, patch, { sessionId: sessionIdOf(exec) })
         const changedTask = findTask(tree, args.id)
-        syncPlanTodos(ctx, exec, tree, tree.id, config)
-        syncPlanGoal(ctx, exec, tree, config)
-        return {
-          text: `Updated task.\n${headline(tree)}\n${changedTask === null ? '' : taskLine(changedTask.task)}`.trimEnd(),
-          plan: treeJson(tree),
-          progress: progressJson(tree.progress),
-        }
+        return mutationResult(
+          ctx,
+          exec,
+          engine,
+          config,
+          tree,
+          `Updated task.\n${headline(tree)}\n${changedTask === null ? '' : taskLine(changedTask.task)}`.trimEnd(),
+        )
       },
     }),
   )
@@ -848,9 +1023,7 @@ export function registerPlanTools(ctx: Context, engine: PlanEngine, config: Plan
       },
       execute: async (args, exec) => {
         const tree = engine.deleteTask(args.id, { sessionId: sessionIdOf(exec) })
-        syncPlanTodos(ctx, exec, tree, tree.id, config)
-        syncPlanGoal(ctx, exec, tree, config)
-        return { text: `Deleted task.\n${headline(tree)}`, plan: treeJson(tree), progress: progressJson(tree.progress) }
+        return mutationResult(ctx, exec, engine, config, tree, `Deleted task.\n${headline(tree)}`)
       },
     }),
   )
@@ -858,7 +1031,7 @@ export function registerPlanTools(ctx: Context, engine: PlanEngine, config: Plan
   register(
     defineTool({
       name: 'plan_export',
-      description: 'Export one plan as markdown with checkboxes into .dsh/plans/<slug>.md.',
+      description: 'Export one plan as markdown with checkboxes into .dsh/plans/<slug>.md; mutations already do this.',
       parameters: {
         id: { type: 'string', required: true, description: 'Plan id (p_…).' },
         workspaceRoot: { type: 'string', description: 'Absolute workspace root; defaults to the session cwd.' },
@@ -924,6 +1097,17 @@ export function registerPlanTools(ctx: Context, engine: PlanEngine, config: Plan
         if (report.stale.length > 0) {
           lines.push(`- stale plans: ${report.stale.map((plan) => `${plan.id} (${plan.title})`).join(', ')}`)
         }
+        lines.push(
+          `- render cost: ${charsLabel(report.notesChars)} characters of task notes in the reported plans`,
+        )
+        if (report.largest.some((plan) => plan.notesChars > 0)) {
+          lines.push(
+            `- largest: ${report.largest
+              .filter((plan) => plan.notesChars > 0)
+              .map((plan) => `${plan.id} (~${charsLabel(plan.chars)} chars, ${charsLabel(plan.notesChars)} of notes)`)
+              .join(', ')}`,
+          )
+        }
         return {
           text: lines.join('\n'),
           report: {
@@ -936,6 +1120,8 @@ export function registerPlanTools(ctx: Context, engine: PlanEngine, config: Plan
             byTaskStatus: { ...report.byTaskStatus },
             phaseCount: report.phaseCount,
             taskCount: report.taskCount,
+            notesChars: report.notesChars,
+            largest: report.largest.map((plan) => summaryJson(plan)),
             stale: report.stale.map((plan) => summaryJson(plan)),
             fts: report.fts,
           },

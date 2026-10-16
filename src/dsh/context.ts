@@ -12,10 +12,11 @@ import type { Context } from '@deepseek-ai/cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import type { CommandInvocation, CommandResult } from '@deepseek-ai/dsh-commands'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
-import type { PromptSection } from '@deepseek-ai/dsh-system-prompt'
+import type { AssembleContext, PromptSection } from '@deepseek-ai/dsh-system-prompt'
 
 import type { PlanStoreConfig } from '../core/config.js'
 import type { PlanEngine } from '../core/engine.js'
+import { projectKeyFromCwd } from '../core/paths.js'
 import { archiveWorkspaceSession, sessionCwd } from './session.js'
 
 /**
@@ -39,12 +40,19 @@ const PROMPT_SECTION_NAME = 'plan-store'
 /** Sort order of the section (after the llm-memory section at 150). */
 const PROMPT_SECTION_ORDER = 160
 
-/** Short guide injected once when a session starts. */
+/**
+ * Short guide injected once when a session starts.
+ *
+ * Off by default (`sessionStartGuide: false`): the system-prompt section is
+ * registered unconditionally and re-assembled on every request, so it also
+ * survives compaction, while the duplicated message costs tokens in every later
+ * request. Kept for profiles that prefer a pinned session message.
+ */
 export const PLAN_STORE_GUIDE = [
   'Plan store is active: plans live in the plugin database (SQLite), not in hand-written markdown.',
   '- Before starting a task, create a plan with plan_create and split it into phases and tasks.',
   '- Keep progress current: doing when you start a task, done when it is finished, blocked (with a note) when you cannot continue.',
-  '- After creating or changing a plan, call plan_export so .dsh/plans/<slug>.md stays current.',
+  '- Every change writes .dsh/plans/<slug>.md automatically; never edit that file by hand and do not call plan_export after a normal change.',
   '- The Plan Board tab in the GUI shows the kanban; /plans lists, exports and reports from the chat.',
 ].join('\n')
 
@@ -62,18 +70,31 @@ function warnContext(ctx: Context, message: string): void {
   }
 }
 
+/**
+ * Workspace key of the agent whose prompt is being assembled, when known.
+ *
+ * `@deepseek-ai/dsh-agent` augments the assembly context with that agent, so a
+ * session's workspace can scope the digest; without an agent the digest stays
+ * cross-project.
+ */
+function workspaceOf(context: AssembleContext | undefined): string | undefined {
+  const cwd = context?.agent?.session.header.cwd
+  return typeof cwd === 'string' && cwd.trim().length > 0 ? projectKeyFromCwd(cwd) : undefined
+}
+
 /** Render the prompt section text: guidance plus the active-plan summary. */
 export function promptSectionText(
   engine: PlanEngine,
   config: PlanStoreConfig,
   onError?: (message: string) => void,
+  workspace?: string,
 ): string {
   const parts: string[] = []
   const base = (config.systemPrompt ?? '').trim()
   if (base.length > 0) parts.push(base)
   if (config.promptActivePlans && config.promptActiveLimit > 0) {
     try {
-      const lines = engine.promptSummary(undefined, config.promptActiveLimit)
+      const lines = engine.promptSummary(workspace, config.promptActiveLimit)
       if (lines.length > 0) {
         parts.push(['Plans currently active or blocked in the store:', ...lines.map((line) => `- ${line}`)].join('\n'))
       }
@@ -89,7 +110,7 @@ function registerSystemPrompt(ctx: Context, engine: PlanEngine, config: PlanStor
   const section: PromptSection = {
     name: PROMPT_SECTION_NAME,
     order: PROMPT_SECTION_ORDER,
-    text: () => promptSectionText(engine, config, (message) => warnContext(ctx, message)),
+    text: (context) => promptSectionText(engine, config, (message) => warnContext(ctx, message), workspaceOf(context)),
   }
   try {
     ctx.systemPrompt.section(section)

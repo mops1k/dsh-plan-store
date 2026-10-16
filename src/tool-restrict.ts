@@ -23,6 +23,10 @@ const FULL_ONLY_TOOL_SCHEMA = z.union([
   z.const('plan_phase_delete'),
   z.const('plan_task_delete'),
   z.const('plan_status'),
+  // Destructive/administrative tools with zero recorded usage: a preset may
+  // deny them explicitly without hiding the plan tools an agent actually uses.
+  z.const('plan_purge'),
+  z.const('plan_import_session'),
 ])
 
 /** Scoped restriction configuration. */

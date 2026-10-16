@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from 'node:fs'
+import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
@@ -193,6 +193,148 @@ describe('listing, search and status', () => {
     const status = await call(tools, 'plan_status', {})
     expect(String(status['text'])).toContain('Plan store: 1 plan(s)')
     expect(String((status['report'] as Record<string, unknown>)['dbPath'])).toContain('plans.db')
+  })
+
+  it('reports the rendering size of an expensive plan', async () => {
+    const { ctx, tools } = makeToolHarness(null)
+    registerPlanTools(ctx, harness.engine, harness.config)
+    const tasks = Array.from({ length: 10 }, (_, index) => ({ title: `task ${index}`, notes: 'n'.repeat(1000) }))
+    await call(tools, 'plan_create', { title: 'Heavy plan', phases: [{ title: 'Work', tasks }] })
+
+    const list = await call(tools, 'plan_list', {})
+    expect(String(list['text'])).toContain('tree: ~11k chars (10k notes)')
+    const rows = list['plans'] as Array<Record<string, unknown>>
+    expect(rows[0]?.['notesChars']).toBe(10000)
+    expect(Number(rows[0]?.['chars'])).toBeGreaterThan(10000)
+
+    const status = await call(tools, 'plan_status', {})
+    expect(String(status['text'])).toContain('render cost: 10k characters of task notes')
+    expect(String(status['text'])).toContain('largest: ')
+    const report = status['report'] as Record<string, unknown>
+    expect(report['notesChars']).toBe(10000)
+    expect(report['largest']).toHaveLength(1)
+  })
+
+  it('keeps a cheap row free of the size hint', async () => {
+    const { ctx, tools } = makeToolHarness(null)
+    registerPlanTools(ctx, harness.engine, harness.config)
+    await call(tools, 'plan_create', { title: 'Light plan', phases: [{ title: 'Work', tasks: ['a'] }] })
+    const list = await call(tools, 'plan_list', {})
+    expect(String(list['text'])).not.toContain('tree: ~')
+    const status = await call(tools, 'plan_status', {})
+    expect(String(status['text'])).not.toContain('largest: ')
+  })
+})
+
+describe('automatic export', () => {
+  it('writes the markdown after a mutation and names the path in the result', async () => {
+    const { ctx, tools } = makeToolHarness(harness.workspace)
+    registerPlanTools(ctx, harness.engine, harness.config)
+    const created = await call(tools, 'plan_create', { title: 'Auto export', phases: [{ title: 'Work', tasks: ['a'] }] })
+    const path = join(harness.workspace, '.dsh/plans/auto-export.md')
+    expect(String(created['text'])).toContain(`Exported: ${path}`)
+    expect(readFileSync(path, 'utf8')).toContain('- [ ] a')
+
+    const plan = created['plan'] as { phases: Array<{ tasks: Array<{ id: string }> }> }
+    const updated = await call(tools, 'plan_task_update', { id: plan.phases[0]!.tasks[0]!.id, status: 'done' })
+    expect(String(updated['text'])).toContain(`Exported: ${path}`)
+    expect(readFileSync(path, 'utf8')).toContain('- [x] a')
+    expect((updated['plan'] as { exportPath: string }).exportPath).toBe(path)
+  })
+
+  it('records no export journal event, while the explicit call still does', async () => {
+    const { ctx, tools } = makeToolHarness(harness.workspace)
+    registerPlanTools(ctx, harness.engine, harness.config)
+    const created = await call(tools, 'plan_create', { title: 'Quiet journal' })
+    const planId = (created['plan'] as { id: string }).id
+    expect(harness.engine.events(planId, 20).map((event) => event.kind)).not.toContain('export')
+
+    await call(tools, 'plan_export', { id: planId })
+    expect(harness.engine.events(planId, 20).map((event) => event.kind)).toContain('export')
+  })
+
+  it('stays quiet when autoExport is off', async () => {
+    harness.config.autoExport = false
+    const { ctx, tools } = makeToolHarness(harness.workspace)
+    registerPlanTools(ctx, harness.engine, harness.config)
+    const created = await call(tools, 'plan_create', { title: 'No file' })
+    expect(String(created['text'])).not.toContain('Exported:')
+    expect(existsSync(join(harness.workspace, '.dsh/plans/no-file.md'))).toBe(false)
+  })
+
+  it('skips the export without a workspace root', async () => {
+    const { ctx, tools } = makeToolHarness(null)
+    registerPlanTools(ctx, harness.engine, harness.config)
+    const created = await call(tools, 'plan_create', { title: 'Loose plan' })
+    expect(String(created['text'])).not.toContain('Exported:')
+  })
+
+  it('keeps the mutation successful and warns when the export fails', async () => {
+    // A `.dsh` regular file blocks creating the export directory inside it.
+    writeFileSync(join(harness.workspace, '.dsh'), 'not a directory')
+    const { ctx, tools, warnings } = makeToolHarness(harness.workspace)
+    registerPlanTools(ctx, harness.engine, harness.config)
+    const created = await call(tools, 'plan_create', { title: 'Broken export' })
+    expect((created['plan'] as { title: string }).title).toBe('Broken export')
+    expect(String(created['text'])).not.toContain('Exported:')
+    expect(warnings.some((warning) => warning.includes('Automatic export'))).toBe(true)
+  })
+})
+
+describe('bounded plan_get', () => {
+  /** Create a plan with `count` tasks whose notes are `noteChars` long. */
+  async function makeBigPlan(tools: Map<string, ToolDefinition>, count: number, noteChars: number) {
+    const tasks = Array.from({ length: count }, (_, index) => ({ title: `task ${index}`, notes: 'n'.repeat(noteChars) }))
+    const created = await call(tools, 'plan_create', { title: 'Big plan', phases: [{ title: 'Work', tasks }] })
+    const plan = created['plan'] as { id: string; phases: Array<{ tasks: Array<{ id: string }> }> }
+    return { created, planId: plan.id, taskIds: plan.phases[0]!.tasks.map((task) => task.id) }
+  }
+
+  it('keeps every task id while clipping the notes of a large plan', async () => {
+    const { ctx, tools } = makeToolHarness(null)
+    registerPlanTools(ctx, harness.engine, harness.config)
+    const { planId, taskIds } = await makeBigPlan(tools, 60, 400)
+
+    const value = await call(tools, 'plan_get', { id: planId })
+    const text = String(value['text'])
+    expect(text.length).toBeLessThan(6500)
+    for (const id of taskIds) expect(text).toContain(id)
+    expect(text).toContain('note/link line(s) clipped')
+
+    const unbounded = await call(tools, 'plan_get', { id: planId, maxChars: 0 })
+    expect(String(unbounded['text']).length).toBeGreaterThan(20000)
+  })
+
+  it('caps the plan_create echo with the same budget', async () => {
+    const { ctx, tools } = makeToolHarness(null)
+    registerPlanTools(ctx, harness.engine, harness.config)
+    const { created } = await makeBigPlan(tools, 60, 400)
+    expect(String(created['text']).length).toBeLessThan(6500)
+  })
+
+  it('reads one task in full through taskId', async () => {
+    const { ctx, tools } = makeToolHarness(null)
+    registerPlanTools(ctx, harness.engine, harness.config)
+    const { planId, taskIds } = await makeBigPlan(tools, 3, 3000)
+
+    const value = await call(tools, 'plan_get', { id: planId, taskId: taskIds[1] })
+    const text = String(value['text'])
+    expect(text).toContain('n'.repeat(3000))
+    expect(text).toContain(taskIds[1])
+    expect(text).not.toContain(taskIds[0]!)
+    expect((value['plan'] as { phases: unknown[] }).phases).toHaveLength(1)
+  })
+
+  it('reads one phase through phaseId and reports unknown ids', async () => {
+    const { ctx, tools } = makeToolHarness(null)
+    registerPlanTools(ctx, harness.engine, harness.config)
+    const { planId, taskIds } = await makeBigPlan(tools, 2, 100)
+    const plan = (await call(tools, 'plan_get', { id: planId }))['plan'] as { phases: Array<{ id: string }> }
+
+    const value = await call(tools, 'plan_get', { id: planId, phaseId: plan.phases[0]!.id })
+    expect(String(value['text'])).toContain(taskIds[0])
+    await expect(call(tools, 'plan_get', { id: planId, taskId: 't_missing' })).rejects.toThrow(/Task not found/u)
+    await expect(call(tools, 'plan_get', { id: planId, phaseId: 'ph_missing' })).rejects.toThrow(/Phase not found/u)
   })
 })
 

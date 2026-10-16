@@ -4,12 +4,12 @@ import { Config } from '../src/index'
 import { PlanStoreSettingsSchema } from '../src/dsh/settings'
 
 describe('startup-only plugin configuration', () => {
-  it('keeps compatibility defaults in the runtime schema', () => {
-    expect(Config({})).toMatchObject({ sessionStartGuide: true })
+  it('keeps the session-start guide off by default', () => {
+    expect(Config({})).toMatchObject({ sessionStartGuide: false })
   })
 
-  it('accepts a disabled session-start guide', () => {
-    expect(Config({ sessionStartGuide: false })).toMatchObject({ sessionStartGuide: false })
+  it('accepts an enabled session-start guide', () => {
+    expect(Config({ sessionStartGuide: true })).toMatchObject({ sessionStartGuide: true })
   })
 
   it('keeps the startup-only field out of the native settings schema', () => {

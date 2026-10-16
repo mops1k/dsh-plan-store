@@ -37,7 +37,7 @@ export const PlanStoreSettingsSchema = z.object({
   autoExport: z
     .boolean()
     .default(DEFAULT_CONFIG.autoExport)
-    .description('Remind the agent to export a plan after it changes.'),
+    .description('Write .dsh/plans/<slug>.md after every plan change, so no plan_export call is needed.'),
   promptActivePlans: z
     .boolean()
     .default(DEFAULT_CONFIG.promptActivePlans)
@@ -84,7 +84,7 @@ export const PlanStorePluginConfigSchema = z.object({
   sessionStartGuide: z
     .boolean()
     .default(DEFAULT_CONFIG.sessionStartGuide)
-    .description('Inject the short session-start guide; disable when a richer system prompt is always available.'),
+    .description('Inject the short session-start guide as a message; off by default because the prompt section already carries it.'),
 })
 
 /** Log a warning through the Cordis logger, falling back to the console. */

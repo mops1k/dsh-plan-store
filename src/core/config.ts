@@ -10,16 +10,21 @@
  */
 import { DEFAULT_EXPORT_DIR, resolveStorageRoot } from './paths.js'
 
-/** Default system-prompt guidance injected while the plugin is active. */
+/**
+ * Default system-prompt guidance injected while the plugin is active.
+ *
+ * Kept to the operational minimum on purpose: the section is re-sent with every
+ * request, and every change of its text makes the harness append another copy of
+ * the whole system prompt to the conversation. Details that only matter while a
+ * tool is in use (export mechanics, the confirmation rule of the administrative
+ * tools, the kanban board) live in the tool descriptions and the settings.
+ */
 export const DEFAULT_SYSTEM_PROMPT = [
   'Plan store: plans live in the plugin database (SQLite), not in hand-written markdown files.',
   '- Before starting a task, create a plan with `plan_create` and split it into phases and tasks.',
-  '- Keep progress current: set a task to `doing` when you start it, `done` when it is finished, and `blocked` (with a note) when you cannot continue.',
-  '- The plan tools run autonomously: never ask the user to confirm; irreversible maintenance, when exposed, requires explicit confirmation.',
-  '- After creating or changing a plan, call `plan_export` so the workspace keeps `.dsh/plans/<slug>.md` with checkboxes — the global rules require that file.',
-  '- Never write or edit `.dsh/plans/*.md` by hand: `plan_export` regenerates the file from the database.',
-  '- Stay cheap: `plan_get` is the only tool that returns the full tree; `plan_list` and `plan_search` answer lookups, and the database (not the exported file) is the source of truth, so there is no need to read the file back.',
-  '- The kanban board (`Plan Board`) in the web GUI shows plans as swimlanes and task statuses as columns.',
+  '- Keep progress current: `doing` when you start a task, `done` when it is finished, `blocked` (with a note) when you cannot continue.',
+  '- Every change writes `.dsh/plans/<slug>.md` automatically: never edit that file by hand and do not call `plan_export` after a normal change.',
+  '- Read cheaply: `plan_list` and `plan_search` answer lookups; `plan_get` returns the tree with notes clipped by its `maxChars` budget, or one task/phase in full through `taskId`/`phaseId`.',
 ].join('\n')
 
 /** Resolved plugin configuration. */
@@ -30,7 +35,7 @@ export interface PlanStoreConfig {
   webPath: string
   /** Export directory relative to the workspace root. */
   exportDir: string
-  /** Remind the agent to export a plan after it changes. */
+  /** Write the markdown export after every plan change. */
   autoExport: boolean
   /** Include a compact summary of active plans in the system prompt. */
   promptActivePlans: boolean
@@ -48,7 +53,7 @@ export interface PlanStoreConfig {
   todoMaxItems: number
   /** Editable system-prompt guidance. */
   systemPrompt: string
-  /** Inject the short guide at session start when no richer system section is available. */
+  /** Inject the short guide as a session message; off by default (the prompt section carries it). */
   sessionStartGuide: boolean
 }
 
@@ -66,7 +71,7 @@ export const DEFAULT_CONFIG: PlanStoreConfig = {
   todoParallelInProgress: false,
   todoMaxItems: 25,
   systemPrompt: DEFAULT_SYSTEM_PROMPT,
-  sessionStartGuide: true,
+  sessionStartGuide: false,
 }
 
 /** Clamp an integer option into its supported range. */
@@ -109,7 +114,7 @@ export function mergeConfig(input?: Partial<PlanStoreConfig> | null): PlanStoreC
       typeof source.systemPrompt === 'string' && source.systemPrompt.trim().length > 0
         ? source.systemPrompt
         : DEFAULT_CONFIG.systemPrompt,
-    sessionStartGuide: source.sessionStartGuide !== false,
+    sessionStartGuide: source.sessionStartGuide === true,
   }
 }
 
