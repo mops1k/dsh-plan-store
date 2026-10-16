@@ -21,6 +21,7 @@ describe('dsh-plan-store tool restriction', () => {
 
   it('accepts an explicit deny list and rejects unknown tools', () => {
     expect(Config({ deny: ['plan_status'] }).deny).toEqual(['plan_status'])
+    expect(Config({ deny: ['plan_purge', 'plan_import_session'] }).deny).toEqual(['plan_purge', 'plan_import_session'])
     expect(() => Config({ deny: ['plan_create'] })).toThrow()
   })
 

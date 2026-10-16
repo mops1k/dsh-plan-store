@@ -330,9 +330,40 @@ describe('listing, search and reporting', () => {
     const lines = harness.engine.promptSummary('demo', 5)
     expect(lines).toHaveLength(1)
     expect(lines[0]).toContain('[active] Active plan')
-    expect(lines[0]).toContain('0/2 tasks')
-    expect(lines[0]).toContain('next: a')
     expect(harness.engine.promptSummary('demo', 0)).toEqual([])
+  })
+
+  it('keeps the prompt summary stable while task progress changes', () => {
+    const created = harness.engine.createPlan({
+      title: 'Stable plan',
+      workspace: 'demo',
+      phases: [{ title: 'Work', tasks: ['a', 'b'] }],
+    })
+    const [firstTask, secondTask] = created.phases[0]!.tasks
+    harness.engine.updateTask(firstTask!.id, { status: 'doing' })
+
+    const before = harness.engine.promptSummary('demo', 5)
+    harness.engine.updateTask(secondTask!.id, { status: 'done' })
+    const after = harness.engine.promptSummary('demo', 5)
+
+    expect(before).toHaveLength(1)
+    expect(after).toEqual(before)
+  })
+
+  it('keeps other workspaces out of a scoped prompt summary', () => {
+    const demo = harness.engine.createPlan({ title: 'Demo plan', workspace: 'demo', phases: [{ title: 'Work', tasks: ['a'] }] })
+    harness.engine.updateTask(demo.phases[0]!.tasks[0]!.id, { status: 'doing' })
+    const other = harness.engine.createPlan({ title: 'Other plan', workspace: 'other', phases: [{ title: 'Work', tasks: ['b'] }] })
+    harness.engine.updateTask(other.phases[0]!.tasks[0]!.id, { status: 'doing' })
+
+    const scoped = harness.engine.promptSummary('demo', 5)
+    expect(scoped).toHaveLength(1)
+    expect(scoped[0]).toContain('Demo plan')
+    expect(scoped[0]).not.toContain('Other plan')
+    expect(scoped[0]).not.toContain('(demo)')
+
+    const wide = harness.engine.promptSummary(undefined, 5)
+    expect(wide.some((line) => line.includes('Other plan (other)'))).toBe(true)
   })
 })
 
